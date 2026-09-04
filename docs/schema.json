@@ -61,7 +61,7 @@
         },
         "shape": {
           "type": ["string", "null"],
-          "description": "Visual/structural hint. Only diagrams currently set this ('node', 'node-decision', 'edge'); every other adapter's regions carry null, since the concept doesn't apply."
+          "description": "Visual/structural hint. Only diagrams currently set this ('node', 'node-decision', 'node-circle', 'edge'); every other adapter's regions carry null, since the concept doesn't apply."
         },
         "language": {
           "type": ["string", "null"],
