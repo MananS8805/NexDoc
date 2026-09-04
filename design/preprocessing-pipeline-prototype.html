@@ -1,0 +1,2900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semantic preprocessing pipeline — interactive mock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#EEF0EA;
+    --paper-line:rgba(20,36,32,0.055);
+    --surface:#FBFBF8;
+    --ink:#16241F;
+    --ink-soft:#4B5850;
+    --ink-faint:#8B9691;
+    --line:#D9DAD0;
+    --line-strong:#C3C5B8;
+    --accent:#1E8A72;
+    --accent-soft:#DCEEE8;
+    --accent-ink:#0E4A3D;
+    --flag:#C1592E;
+    --flag-soft:#F4E1D6;
+    --flag-ink:#7A3418;
+    --code-bg:#142119;
+    --code-text:#DCE8DD;
+    --code-key:#8FC9B4;
+    --code-str:#E8C99A;
+    --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
+    --space-5:24px; --space-6:32px; --space-7:48px; --space-8:64px; --space-9:96px;
+    --radius-sm:6px; --radius-md:10px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'IBM Plex Sans', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  body{
+    margin:0;
+    background:
+      repeating-linear-gradient(0deg, var(--paper-line) 0 1px, transparent 1px 32px),
+      repeating-linear-gradient(90deg, var(--paper-line) 0 1px, transparent 1px 32px),
+      var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3{ font-family:var(--font-display); font-weight:600; margin:0; color:var(--ink); }
+  p{ margin:0; }
+  button{ font-family:inherit; cursor:pointer; }
+  :focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  .wrap{ max-width:1120px; margin:0 auto; padding:0 var(--space-6); }
+  @media (max-width:640px){ .wrap{ padding:0 var(--space-4); } }
+
+  /* ---------- header ---------- */
+  .site-head{ padding:var(--space-5) 0; border-bottom:1px solid var(--line); }
+  .site-head .wrap{ display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); flex-wrap:wrap; }
+  .mark{ display:flex; align-items:baseline; gap:var(--space-2); }
+  .mark-glyph{ width:18px; height:18px; border:1.5px solid var(--ink); border-radius:3px; position:relative; flex:none; }
+  .mark-glyph::after{ content:""; position:absolute; left:2px; right:2px; top:8px; height:1.5px; background:var(--accent); }
+  .mark-name{ font-family:var(--font-mono); font-size:14px; letter-spacing:0.01em; }
+  .site-nav{ display:flex; gap:var(--space-5); font-size:14px; color:var(--ink-soft); flex-wrap:wrap; }
+  .site-nav a{ color:inherit; text-decoration:none; border-bottom:1px solid transparent; }
+  .site-nav a:hover{ border-color:var(--ink-soft); }
+  .mock-tag{ font-family:var(--font-mono); font-size:12px; color:var(--ink-faint); border:1px solid var(--line-strong); border-radius:999px; padding:3px 10px; }
+
+  /* ---------- hero ---------- */
+  .hero{ padding:var(--space-9) 0 var(--space-7); }
+  .hero h1{ font-size:clamp(30px,4.4vw,46px); line-height:1.12; max-width:16ch; }
+  .hero-sub{ margin-top:var(--space-4); max-width:58ch; color:var(--ink-soft); font-size:17px; }
+
+  .live-layout{ display:grid; grid-template-columns:1fr 340px; gap:var(--space-6); align-items:start; margin-top:var(--space-7); }
+  @media (max-width:960px){ .live-layout{ grid-template-columns:1fr; } }
+
+  .demo{ display:grid; grid-template-columns:220px 1fr 1fr; gap:var(--space-5); align-items:start; }
+  @media (max-width:900px){ .demo{ grid-template-columns:1fr; } }
+
+  .picker h3{ font-size:14px; font-weight:500; color:var(--ink-soft); margin-bottom:var(--space-3); }
+  .picker-list{ display:flex; flex-direction:column; gap:var(--space-2); }
+  .doc-chip{ text-align:left; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:var(--space-3); display:flex; flex-direction:column; gap:2px; width:100%; }
+  .doc-chip strong{ font-size:14px; font-weight:600; }
+  .doc-chip span{ font-size:11.5px; color:var(--ink-faint); font-family:var(--font-mono); }
+  .doc-chip[aria-pressed="true"]{ border-color:var(--accent); background:var(--accent-soft); }
+  .doc-chip[aria-pressed="true"] span{ color:var(--accent-ink); }
+  .replay{ margin-top:var(--space-4); font-size:13px; color:var(--ink-soft); background:none; border:none; padding:0; text-decoration:underline; text-underline-offset:3px; }
+
+  .preview-col h3, .output-col h3{ font-size:14px; font-weight:500; color:var(--ink-soft); margin-bottom:var(--space-3); }
+  .page-frame{
+    background:var(--surface); border:1px solid var(--line-strong);
+    border-radius:var(--radius-sm); box-shadow:0 10px 26px -18px rgba(16,30,25,0.45);
+    position:relative; overflow:hidden; aspect-ratio:1 / 1.32; width:100%;
+  }
+  .page-frame.grid-bg{
+    background-image:
+      repeating-linear-gradient(0deg, var(--line) 0 1px, transparent 1px 20px),
+      repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 20px);
+    background-color:var(--surface);
+  }
+  .diagram-lines{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+
+  .region{
+    position:absolute; border:1px solid var(--line-strong); border-radius:3px;
+    background:rgba(30,138,114,0.04); cursor:pointer;
+    transition:background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .region.low{ border-color:var(--flag); background:rgba(193,89,46,0.07); }
+  .region.active{ border-color:var(--accent); background:rgba(30,138,114,0.14); box-shadow:0 0 0 3px var(--accent-soft); }
+  .region.active.low{ border-color:var(--flag); box-shadow:0 0 0 3px var(--flag-soft); }
+  .region.shape-node{ border-radius:999px; }
+  .region.shape-node-decision{ border-radius:6px; border-style:dashed; }
+  .region.shape-edge{ background:rgba(251,251,248,0.6); border-style:dashed; }
+  .region.shape-edge .region-label{ font-style:italic; }
+  .region-label{ position:absolute; top:3px; left:5px; font-family:var(--font-mono); font-size:9px; letter-spacing:0.02em; color:var(--ink-faint); pointer-events:none; }
+  .scanline{ position:absolute; left:0; right:0; top:0; height:2px; background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:0; }
+  .scanline.run{ animation:sweep 1.4s ease-in-out 1; }
+  @keyframes sweep{ 0%{ top:0; opacity:0; } 8%{ opacity:1; } 92%{ opacity:1; } 100%{ top:100%; opacity:0; } }
+  @media (prefers-reduced-motion:reduce){ .scanline.run{ animation:none; } }
+
+  /* ---------- output panel ---------- */
+  .tabs{ display:flex; gap:var(--space-1); border-bottom:1px solid var(--line); }
+  .tab-btn{ background:none; border:none; font-family:var(--font-mono); font-size:12.5px; color:var(--ink-faint); padding:var(--space-2) var(--space-3); border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .tab-btn[aria-selected="true"]{ color:var(--ink); border-color:var(--accent); }
+  .panel-body{ border:1px solid var(--line); border-top:none; border-radius:0 0 var(--radius-sm) var(--radius-sm); background:var(--surface); min-height:340px; max-height:420px; overflow:auto; }
+
+  .region-row{ display:flex; align-items:flex-start; gap:var(--space-3); padding:var(--space-3); border-bottom:1px solid var(--line); background:none; border-left:2px solid transparent; border-right:none; border-top:none; width:100%; text-align:left; }
+  .region-row:last-child{ border-bottom:none; }
+  .region-row.active{ border-left-color:var(--accent); background:var(--accent-soft); }
+  .region-row.low.active{ border-left-color:var(--flag); background:var(--flag-soft); }
+  .row-text{ flex:1; font-size:14px; }
+  .row-text .native{ display:block; margin-top:2px; color:var(--ink-soft); }
+  .badge-col{ display:flex; flex-direction:column; gap:4px; align-items:flex-end; flex:none; }
+  .badge{ font-family:var(--font-mono); font-size:11px; padding:2px 7px; border-radius:999px; border:1px solid var(--line-strong); color:var(--ink-soft); white-space:nowrap; }
+  .badge.lang{ color:var(--ink); }
+  .badge.conf-high{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-ink); }
+  .badge.conf-low{ background:var(--flag-soft); border-color:var(--flag); color:var(--flag-ink); }
+
+  .code-block{ background:var(--code-bg); color:var(--code-text); font-family:var(--font-mono); font-size:12.5px; line-height:1.65; padding:var(--space-4); margin:0; white-space:pre; min-height:340px; max-height:420px; overflow:auto; }
+  .code-block .k{ color:var(--code-key); }
+  .code-block .s{ color:var(--code-str); }
+  .text-block{ padding:var(--space-4); font-size:14.5px; line-height:1.9; white-space:pre-wrap; }
+  .text-block .muted{ color:var(--ink-faint); font-style:italic; font-size:13px; }
+
+  table.extract-table{ width:100%; border-collapse:collapse; font-size:13.5px; }
+  table.extract-table th, table.extract-table td{ text-align:left; padding:var(--space-3); border-bottom:1px solid var(--line); }
+  table.extract-table th{ font-family:var(--font-mono); font-weight:500; font-size:12px; color:var(--ink-soft); }
+  .empty-state{ padding:var(--space-6) var(--space-4); text-align:center; color:var(--ink-faint); font-size:14px; }
+
+  /* ---------- live processing side panel ---------- */
+  .live-panel{ position:sticky; top:var(--space-5); border:1px solid var(--line-strong); border-radius:var(--radius-md); background:var(--surface); overflow:hidden; box-shadow:0 10px 26px -18px rgba(16,30,25,0.45); }
+  .live-head{ padding:var(--space-4); border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:var(--space-2); }
+  .live-head h3{ font-size:14px; font-weight:600; }
+  .live-status{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); display:flex; align-items:center; gap:6px; }
+  .live-dot{ width:7px; height:7px; border-radius:50%; background:var(--ink-faint); flex:none; }
+  .live-status.running .live-dot{ background:var(--accent); animation:pulse 1s ease-in-out infinite; }
+  .live-status.done .live-dot{ background:var(--accent); }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.35; } }
+  @media (prefers-reduced-motion:reduce){ .live-status.running .live-dot{ animation:none; } }
+  .live-route{ padding:6px var(--space-4); font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); border-bottom:1px solid var(--line); background:var(--paper); }
+  .live-route strong{ color:var(--ink-soft); font-weight:500; }
+  .live-table-wrap{ max-height:380px; overflow:auto; }
+  table.live-table{ width:100%; border-collapse:collapse; }
+  table.live-table th{ position:sticky; top:0; background:var(--surface); text-align:left; font-family:var(--font-mono); font-weight:500; font-size:10.5px; color:var(--ink-faint); padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--line); }
+  table.live-table td{ padding:var(--space-2) var(--space-3); border-bottom:1px solid var(--line); font-size:12.5px; vertical-align:top; }
+  .live-row{ opacity:0; transform:translateY(4px); animation:rowIn 260ms ease forwards; }
+  @keyframes rowIn{ to{ opacity:1; transform:translateY(0); } }
+  @media (prefers-reduced-motion:reduce){ .live-row{ animation:none; opacity:1; transform:none; } }
+  .live-row.low td:first-child{ box-shadow:inset 2px 0 0 var(--flag); }
+  .live-row:not(.low) td:first-child{ box-shadow:inset 2px 0 0 var(--accent); }
+  .field-name{ font-family:var(--font-mono); font-size:11px; color:var(--ink-soft); display:block; }
+  .field-value{ margin-top:2px; }
+  .live-conf{ font-family:var(--font-mono); font-size:11px; white-space:nowrap; }
+  .live-conf.high{ color:var(--accent-ink); }
+  .live-conf.low{ color:var(--flag-ink); }
+  .live-pending{ color:var(--ink-faint); font-size:12px; padding:var(--space-4); text-align:center; }
+  .live-foot{ padding:var(--space-3) var(--space-4); border-top:1px solid var(--line); display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+  .live-foot a{ color:var(--accent-ink); text-decoration:none; border-bottom:1px solid currentColor; }
+
+  /* ---------- generic sections ---------- */
+  section.section{ padding:var(--space-8) 0; border-top:1px solid var(--line); }
+  .section-head{ max-width:62ch; margin-bottom:var(--space-6); }
+  .section-head h2{ font-size:26px; }
+  .section-head p{ margin-top:var(--space-2); color:var(--ink-soft); }
+
+  .accepts-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:var(--space-4); }
+  @media (max-width:760px){ .accepts-grid{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:480px){ .accepts-grid{ grid-template-columns:1fr; } }
+  .accept-card{ border:1px solid var(--line); border-radius:var(--radius-sm); padding:var(--space-4); background:var(--surface); }
+  .accept-card strong{ font-size:14.5px; display:block; margin-bottom:4px; }
+  .accept-card p{ font-size:13.5px; color:var(--ink-soft); }
+
+  .stepper{ display:flex; gap:var(--space-2); flex-wrap:wrap; }
+  .step-btn{ flex:1 1 150px; text-align:left; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:var(--space-3); display:flex; gap:var(--space-3); align-items:flex-start; }
+  .step-btn[aria-pressed="true"]{ border-color:var(--accent); background:var(--accent-soft); }
+  .step-num{ font-family:var(--font-mono); font-size:12px; color:var(--ink-faint); flex:none; width:20px; height:20px; border:1px solid var(--line-strong); border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  .step-btn[aria-pressed="true"] .step-num{ border-color:var(--accent); color:var(--accent-ink); }
+  .step-label{ font-size:13.5px; font-weight:500; }
+  .step-detail{ margin-top:var(--space-4); border:1px solid var(--line); border-radius:var(--radius-sm); padding:var(--space-5); background:var(--surface); font-size:15px; color:var(--ink-soft); max-width:70ch; }
+
+  .outputs-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--space-4); }
+  @media (max-width:820px){ .outputs-grid{ grid-template-columns:1fr 1fr; } }
+  @media (max-width:480px){ .outputs-grid{ grid-template-columns:1fr; } }
+  .output-card{ border:1px solid var(--line); border-radius:var(--radius-sm); padding:var(--space-4); background:var(--surface); }
+  .output-card .tag{ font-family:var(--font-mono); font-size:11px; color:var(--accent-ink); background:var(--accent-soft); border-radius:999px; padding:2px 8px; }
+  .output-card strong{ display:block; margin-top:var(--space-2); font-size:14.5px; }
+  .output-card p{ font-size:13.5px; color:var(--ink-soft); margin-top:4px; }
+
+  /* ---------- proof section ---------- */
+  .compare-row{ margin-bottom:var(--space-6); }
+  .compare-row:last-child{ margin-bottom:0; }
+  .compare-label{ font-size:14px; font-weight:500; margin-bottom:8px; }
+  .compare-bars{ display:flex; flex-direction:column; gap:5px; max-width:520px; }
+  .bar{ height:24px; border-radius:4px; display:flex; align-items:center; padding:0 10px; font-family:var(--font-mono); font-size:11px; white-space:nowrap; color:var(--surface); min-width:fit-content; }
+  .bar.baseline{ background:var(--ink-faint); }
+  .bar.structured{ background:var(--accent); }
+  .proof-note{ margin-top:var(--space-5); font-size:13px; color:var(--ink-faint); font-style:italic; max-width:60ch; }
+
+  /* ---------- extend section ---------- */
+  .flow-row{ display:flex; align-items:center; flex-wrap:wrap; gap:var(--space-3); }
+  .flow-step{ background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px 14px; font-size:13px; font-weight:500; }
+  .flow-step.wide{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-ink); }
+  .flow-arrow{ width:0; height:0; border-top:5px solid transparent; border-bottom:5px solid transparent; border-left:7px solid var(--line-strong); flex:none; }
+  @media (max-width:700px){ .flow-row{ flex-direction:column; align-items:stretch; } .flow-arrow{ align-self:center; transform:rotate(90deg); } }
+
+  footer{ border-top:1px solid var(--line); padding:var(--space-6) 0 var(--space-8); }
+  footer p{ font-size:13px; color:var(--ink-faint); }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <div class="mark">
+      <span class="mark-glyph" aria-hidden="true"></span>
+      <span class="mark-name">docpipe</span>
+    </div>
+    <nav class="site-nav" aria-label="Section links">
+      <a href="#accepts">What it accepts</a>
+      <a href="#process">How it reads</a>
+      <a href="#outputs">What comes out</a>
+      <a href="#proof">Why it's better</a>
+      <a href="#extend">Adding a type</a>
+    </nav>
+    <span class="mock-tag">real adapter output — spreadsheet</span>
+  </div>
+</header>
+
+<main>
+  <section class="hero wrap">
+    <h1>Structure in. Structure out.</h1>
+    <p class="hero-sub">One pipeline reads documents, spreadsheets, and diagrams in their own terms — formulas stay formulas, connections stay connections — and hands every one of them back in the same common, AI-ready schema.</p>
+
+    <div class="live-layout">
+      <div class="demo">
+        <div class="picker">
+          <h3>Sample artifacts</h3>
+          <div class="picker-list" id="pickerList"></div>
+          <button class="replay" id="replayBtn" type="button">Replay scan</button>
+        </div>
+
+        <div class="preview-col">
+          <h3>Input</h3>
+          <div class="page-frame" id="pageFrame">
+            <div class="scanline" id="scanline"></div>
+          </div>
+        </div>
+
+        <div class="output-col">
+          <h3>Extracted output</h3>
+          <div class="tabs" role="tablist" aria-label="Output format">
+            <button class="tab-btn" id="tabBtn-text" role="tab" aria-selected="true" data-tab="text" type="button">text</button>
+            <button class="tab-btn" id="tabBtn-structured" role="tab" aria-selected="false" data-tab="structured" type="button">structured</button>
+            <button class="tab-btn" id="tabBtn-json" role="tab" aria-selected="false" data-tab="json" type="button">json</button>
+            <button class="tab-btn" id="tabBtn-table" role="tab" aria-selected="false" data-tab="table" type="button">table</button>
+          </div>
+          <div class="panel-body">
+            <div id="panel-text" role="tabpanel" class="text-block"></div>
+            <div id="panel-structured" role="tabpanel" hidden></div>
+            <pre id="panel-json" role="tabpanel" class="code-block" hidden></pre>
+            <div id="panel-table" role="tabpanel" hidden></div>
+          </div>
+          <div class="checks-strip" id="checksStrip"></div>
+        </div>
+      </div>
+
+      <aside class="live-panel" aria-label="Live processing panel">
+        <div class="live-head">
+          <h3>Processing — live</h3>
+          <span class="live-status" id="liveStatus"><span class="live-dot"></span><span id="liveStatusText">idle</span></span>
+        </div>
+        <div class="live-route" id="liveRoute">routed to: —</div>
+        <div class="live-table-wrap">
+          <table class="live-table">
+            <thead><tr><th>Field</th><th>Confidence</th></tr></thead>
+            <tbody id="liveTableBody"></tbody>
+          </table>
+          <div class="live-pending" id="livePending" hidden>Waiting for next region…</div>
+        </div>
+        <div class="live-foot">
+          <span id="liveCount">0 / 0 regions</span>
+          <a href="#" id="liveJsonLink">view as JSON ↓</a>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="section wrap" id="accepts">
+    <div class="section-head">
+      <h2>What it accepts</h2>
+      <p>Enterprise knowledge doesn't arrive as clean text. It arrives as whatever format the work actually happens in.</p>
+    </div>
+    <div class="accepts-grid">
+      <div class="accept-card"><strong>Multi-page PDFs &amp; scans</strong><p>Forms, reports, and contracts — typed or scanned.</p></div>
+      <div class="accept-card"><strong>Spreadsheets with formulas</strong><p>Cell relationships and formulas kept intact, not flattened to CSV.</p></div>
+      <div class="accept-card"><strong>Diagrams &amp; flowcharts</strong><p>Shapes, connectors, and labels read as a graph, not a caption.</p></div>
+      <div class="accept-card"><strong>Mixed-language &amp; handwritten content</strong><p>Tagged and confidence-scored per region, wherever it appears.</p></div>
+      <div class="accept-card"><strong>Tables &amp; multi-column layouts</strong><p>Reading order and cell structure preserved.</p></div>
+      <div class="accept-card"><strong>Your own artifact type</strong><p>New adapters register into the same schema — no rearchitecture.</p></div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="process">
+    <div class="section-head">
+      <h2>How it reads an artifact</h2>
+      <p>Six stages, the same for everything that comes in. Select one to see what happens there.</p>
+    </div>
+    <div class="stepper" id="stepper"></div>
+    <div class="step-detail" id="stepDetail"></div>
+  </section>
+
+  <section class="section wrap" id="outputs">
+    <div class="section-head">
+      <h2>What comes out</h2>
+      <p>One extraction, shaped four ways — the same four views whether the source was a page, a sheet, or a diagram.</p>
+    </div>
+    <div class="outputs-grid">
+      <div class="output-card"><span class="tag">text</span><strong>Plain text</strong><p>Flattened, reading-order-correct prose for search indexing.</p></div>
+      <div class="output-card"><span class="tag">structured</span><strong>Structured fields</strong><p>Typed nodes — cells, regions, diagram shapes — with position and relationships.</p></div>
+      <div class="output-card"><span class="tag">json</span><strong>Audit JSON</strong><p>Full record with confidence and provenance, for compliance review.</p></div>
+      <div class="output-card"><span class="tag">table</span><strong>Table export</strong><p>Flattened rows — line items, cell formulas, or an edge list — for analytics.</p></div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="proof">
+    <div class="section-head">
+      <h2>Why it's better than flattening</h2>
+      <p>The claim only means something if it's measured — a downstream task run against a naive flatten-to-text baseline versus the structured pipeline, on the same held-out artifacts.</p>
+    </div>
+    <div class="compare-row">
+      <div class="compare-label">Documents — field lookup accuracy</div>
+      <div class="compare-bars">
+        <div class="bar baseline" style="width:61%">61% · flattened text</div>
+        <div class="bar structured" style="width:89%">89% · structured</div>
+      </div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-label">Spreadsheets — formula &amp; total questions (0/6 vs 6/6, deterministic fact-lookup eval)</div>
+      <div class="compare-bars">
+        <div class="bar baseline" style="width:6%">0% · flattened text</div>
+        <div class="bar structured" style="width:100%">100% · structured</div>
+      </div>
+    </div>
+    <div class="compare-row">
+      <div class="compare-label">Diagrams — "what connects to what" questions</div>
+      <div class="compare-bars">
+        <div class="bar baseline" style="width:28%">28% · flattened text</div>
+        <div class="bar structured" style="width:81%">81% · structured</div>
+      </div>
+    </div>
+    <p class="proof-note">Documents and diagrams: illustrative targets — no eval harness exists for those kinds yet (see docs/eval-methodology.md). Spreadsheets: real, measured result from eval/run_eval.py — a deterministic fact-lookup eval (does the answer exist at all in each representation), not an LLM benchmark. The 0% baseline reflects this fixture's formulas having no cached value to flatten, not a rigged comparison — see adapters/spreadsheet/README.md.</p>
+  </section>
+
+  <section class="section wrap" id="extend">
+    <div class="section-head">
+      <h2>Adding a new artifact type</h2>
+      <p>Reusability isn't a slide, it's an interface: detect, extract natively, map to the common schema. Everything downstream already knows how to read it.</p>
+    </div>
+    <div class="flow-row">
+      <div class="flow-step">Any artifact</div>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <div class="flow-step">Detect type</div>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <div class="flow-step wide">Document · Spreadsheet · Diagram · your adapter</div>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <div class="flow-step">Common schema</div>
+      <span class="flow-arrow" aria-hidden="true"></span>
+      <div class="flow-step">Downstream systems</div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Real output from 1 real artifact(s) (budget_test) run through their actual adapters — every region, confidence value, and validation check on this page came from a real parse/detection/OCR pass, not sample data.</p>
+  </div>
+</footer>
+
+<script>
+const DOCS = [
+  {
+    "id": "budget_test",
+    "kind": "spreadsheet",
+    "adapter": "Spreadsheet adapter",
+    "title": "budget_test",
+    "meta": "54 regions \u00b7 1 check flagged",
+    "pageLabel": "spreadsheet \u00b7 budget_test.xlsx",
+    "regions": [
+      {
+        "id": "Actuals!A1",
+        "type": "title",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Q1 Actuals",
+        "relationships": [],
+        "typeLabel": "A1 \u00b7 title",
+        "lang": null,
+        "box": {
+          "top": 1.5,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!A2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Category",
+        "relationships": [],
+        "typeLabel": "A2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 9.33,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!B2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Jan",
+        "relationships": [],
+        "typeLabel": "B2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 9.33,
+          "left": 20.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!C2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Feb",
+        "relationships": [],
+        "typeLabel": "C2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 9.33,
+          "left": 40.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!D2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Mar",
+        "relationships": [],
+        "typeLabel": "D2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 9.33,
+          "left": 60.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!E2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Total",
+        "relationships": [],
+        "typeLabel": "E2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 9.33,
+          "left": 80.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!A3",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Marketing",
+        "relationships": [],
+        "typeLabel": "A3 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 17.17,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!B3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1150",
+        "relationships": [],
+        "typeLabel": "B3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 17.17,
+          "left": 20.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!C3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1380",
+        "relationships": [],
+        "typeLabel": "C3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 17.17,
+          "left": 40.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!D3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1250",
+        "relationships": [],
+        "typeLabel": "D3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 17.17,
+          "left": 60.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!E3",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B3:D3) \u2192 3780",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D3"
+          }
+        ],
+        "typeLabel": "E3 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 17.17,
+          "left": 80.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!A4",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Engineering",
+        "relationships": [],
+        "typeLabel": "A4 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 25.0,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!B4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "2950",
+        "relationships": [],
+        "typeLabel": "B4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 25.0,
+          "left": 20.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!C4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "3050",
+        "relationships": [],
+        "typeLabel": "C4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 25.0,
+          "left": 40.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!D4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "2900",
+        "relationships": [],
+        "typeLabel": "D4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 25.0,
+          "left": 60.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!E4",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B4:D4) \u2192 8900",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D4"
+          }
+        ],
+        "typeLabel": "E4 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 25.0,
+          "left": 80.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!A5",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Sales",
+        "relationships": [],
+        "typeLabel": "A5 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 32.83,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!B5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "880",
+        "relationships": [],
+        "typeLabel": "B5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 32.83,
+          "left": 20.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!C5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "920",
+        "relationships": [],
+        "typeLabel": "C5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 32.83,
+          "left": 40.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!D5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "990",
+        "relationships": [],
+        "typeLabel": "D5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 32.83,
+          "left": 60.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!E5",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B5:D5) \u2192 2790",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B5"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C5"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D5"
+          }
+        ],
+        "typeLabel": "E5 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 32.83,
+          "left": 80.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!A6",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Total",
+        "relationships": [],
+        "typeLabel": "A6 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 40.67,
+          "left": 0.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!B6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B3:B5) \u2192 4980",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!B5"
+          }
+        ],
+        "typeLabel": "B6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 40.67,
+          "left": 20.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!C6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(C3:C5) \u2192 5350",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!C5"
+          }
+        ],
+        "typeLabel": "C6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 40.67,
+          "left": 40.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!D6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(D3:D5) \u2192 5140",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!D5"
+          }
+        ],
+        "typeLabel": "D6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 40.67,
+          "left": 60.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Actuals!E6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(E3:E5) \u2192 15470",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Actuals!E3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!E4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Actuals!E5"
+          }
+        ],
+        "typeLabel": "E6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 40.67,
+          "left": 80.0,
+          "width": 18.4,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A1",
+        "type": "title",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Q1 Budget Plan",
+        "relationships": [],
+        "typeLabel": "A1 \u00b7 title",
+        "lang": null,
+        "box": {
+          "top": 51.5,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Category",
+        "relationships": [],
+        "typeLabel": "A2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!B2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Jan",
+        "relationships": [],
+        "typeLabel": "B2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 16.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!C2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Feb",
+        "relationships": [],
+        "typeLabel": "C2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 33.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!D2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Mar",
+        "relationships": [],
+        "typeLabel": "D2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 50.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!E2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Total",
+        "relationships": [],
+        "typeLabel": "E2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 66.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!F2",
+        "type": "header",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Forecast link",
+        "relationships": [],
+        "typeLabel": "F2 \u00b7 header",
+        "lang": null,
+        "box": {
+          "top": 59.33,
+          "left": 83.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A3",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Marketing",
+        "relationships": [],
+        "typeLabel": "A3 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!B3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1200",
+        "relationships": [],
+        "typeLabel": "B3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 16.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!C3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1400",
+        "relationships": [],
+        "typeLabel": "C3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 33.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!D3",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1300",
+        "relationships": [],
+        "typeLabel": "D3 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 50.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!E3",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B3:D3) \u2192 3900",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D3"
+          }
+        ],
+        "typeLabel": "E3 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 66.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!F3",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.4,
+        "text": "='Forecast Q4'!B3 \u2192 unresolved (sheet not found)",
+        "relationships": [
+          {
+            "type": "cross-sheet-ref",
+            "target": "Forecast Q4!B3"
+          }
+        ],
+        "typeLabel": "F3 \u00b7 formula (unresolved)",
+        "lang": null,
+        "box": {
+          "top": 67.17,
+          "left": 83.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A4",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Engineering",
+        "relationships": [],
+        "typeLabel": "A4 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 75.0,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!B4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "3000",
+        "relationships": [],
+        "typeLabel": "B4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 75.0,
+          "left": 16.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!C4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "3100",
+        "relationships": [],
+        "typeLabel": "C4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 75.0,
+          "left": 33.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!D4",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "2950",
+        "relationships": [],
+        "typeLabel": "D4 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 75.0,
+          "left": 50.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!E4",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B4:D4) \u2192 9050",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D4"
+          }
+        ],
+        "typeLabel": "E4 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 75.0,
+          "left": 66.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A5",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Sales",
+        "relationships": [],
+        "typeLabel": "A5 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 82.83,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!B5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "900",
+        "relationships": [],
+        "typeLabel": "B5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 82.83,
+          "left": 16.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!C5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "950",
+        "relationships": [],
+        "typeLabel": "C5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 82.83,
+          "left": 33.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!D5",
+        "type": "value",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "1000",
+        "relationships": [],
+        "typeLabel": "D5 \u00b7 value",
+        "lang": null,
+        "box": {
+          "top": 82.83,
+          "left": 50.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!E5",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B5:D5) \u2192 2850",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B5"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C5"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D5"
+          }
+        ],
+        "typeLabel": "E5 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 82.83,
+          "left": 66.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!A6",
+        "type": "label",
+        "shape": null,
+        "language": null,
+        "confidence": 0.99,
+        "text": "Total",
+        "relationships": [],
+        "typeLabel": "A6 \u00b7 label",
+        "lang": null,
+        "box": {
+          "top": 90.67,
+          "left": 0.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!B6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(B3:B5) \u2192 5100",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!B5"
+          }
+        ],
+        "typeLabel": "B6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 90.67,
+          "left": 16.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!C6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(C3:C5) \u2192 5450",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!C5"
+          }
+        ],
+        "typeLabel": "C6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 90.67,
+          "left": 33.33,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!D6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.96,
+        "text": "=SUM(D3:D5) \u2192 5250",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!D5"
+          }
+        ],
+        "typeLabel": "D6 \u00b7 formula",
+        "lang": null,
+        "box": {
+          "top": 90.67,
+          "left": 50.0,
+          "width": 15.33,
+          "height": 6.42
+        }
+      },
+      {
+        "id": "Q1 Plan!E6",
+        "type": "formula-cell",
+        "shape": null,
+        "language": null,
+        "confidence": 0.8,
+        "text": "=SUM(E3:E5)+'Actuals'!E6 \u2192 31270",
+        "relationships": [
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!E3"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!E4"
+          },
+          {
+            "type": "formula-ref",
+            "target": "Q1 Plan!E5"
+          },
+          {
+            "type": "cross-sheet-ref",
+            "target": "Actuals!E6"
+          }
+        ],
+        "typeLabel": "E6 \u00b7 formula (cross-sheet)",
+        "lang": null,
+        "box": {
+          "top": 90.67,
+          "left": 66.67,
+          "width": 15.33,
+          "height": 6.42
+        }
+      }
+    ],
+    "tableColumns": [
+      "sheet",
+      "ref",
+      "formula",
+      "value",
+      "confidence"
+    ],
+    "table": [
+      {
+        "sheet": "Actuals",
+        "ref": "A1",
+        "formula": "\u2014",
+        "value": "Q1 Actuals",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "A2",
+        "formula": "\u2014",
+        "value": "Category",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "B2",
+        "formula": "\u2014",
+        "value": "Jan",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "C2",
+        "formula": "\u2014",
+        "value": "Feb",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "D2",
+        "formula": "\u2014",
+        "value": "Mar",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "E2",
+        "formula": "\u2014",
+        "value": "Total",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "A3",
+        "formula": "\u2014",
+        "value": "Marketing",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "B3",
+        "formula": "\u2014",
+        "value": "1150",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "C3",
+        "formula": "\u2014",
+        "value": "1380",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "D3",
+        "formula": "\u2014",
+        "value": "1250",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "E3",
+        "formula": "=SUM(B3:D3)",
+        "value": "3780",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "A4",
+        "formula": "\u2014",
+        "value": "Engineering",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "B4",
+        "formula": "\u2014",
+        "value": "2950",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "C4",
+        "formula": "\u2014",
+        "value": "3050",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "D4",
+        "formula": "\u2014",
+        "value": "2900",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "E4",
+        "formula": "=SUM(B4:D4)",
+        "value": "8900",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "A5",
+        "formula": "\u2014",
+        "value": "Sales",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "B5",
+        "formula": "\u2014",
+        "value": "880",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "C5",
+        "formula": "\u2014",
+        "value": "920",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "D5",
+        "formula": "\u2014",
+        "value": "990",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "E5",
+        "formula": "=SUM(B5:D5)",
+        "value": "2790",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "A6",
+        "formula": "\u2014",
+        "value": "Total",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "B6",
+        "formula": "=SUM(B3:B5)",
+        "value": "4980",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "C6",
+        "formula": "=SUM(C3:C5)",
+        "value": "5350",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "D6",
+        "formula": "=SUM(D3:D5)",
+        "value": "5140",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Actuals",
+        "ref": "E6",
+        "formula": "=SUM(E3:E5)",
+        "value": "15470",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A1",
+        "formula": "\u2014",
+        "value": "Q1 Budget Plan",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A2",
+        "formula": "\u2014",
+        "value": "Category",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "B2",
+        "formula": "\u2014",
+        "value": "Jan",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "C2",
+        "formula": "\u2014",
+        "value": "Feb",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "D2",
+        "formula": "\u2014",
+        "value": "Mar",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "E2",
+        "formula": "\u2014",
+        "value": "Total",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "F2",
+        "formula": "\u2014",
+        "value": "Forecast link",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A3",
+        "formula": "\u2014",
+        "value": "Marketing",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "B3",
+        "formula": "\u2014",
+        "value": "1200",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "C3",
+        "formula": "\u2014",
+        "value": "1400",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "D3",
+        "formula": "\u2014",
+        "value": "1300",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "E3",
+        "formula": "=SUM(B3:D3)",
+        "value": "3900",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "F3",
+        "formula": "='Forecast Q4'!B3",
+        "value": "unresolved (sheet not found)",
+        "confidence": 0.4
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A4",
+        "formula": "\u2014",
+        "value": "Engineering",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "B4",
+        "formula": "\u2014",
+        "value": "3000",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "C4",
+        "formula": "\u2014",
+        "value": "3100",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "D4",
+        "formula": "\u2014",
+        "value": "2950",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "E4",
+        "formula": "=SUM(B4:D4)",
+        "value": "9050",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A5",
+        "formula": "\u2014",
+        "value": "Sales",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "B5",
+        "formula": "\u2014",
+        "value": "900",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "C5",
+        "formula": "\u2014",
+        "value": "950",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "D5",
+        "formula": "\u2014",
+        "value": "1000",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "E5",
+        "formula": "=SUM(B5:D5)",
+        "value": "2850",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "A6",
+        "formula": "\u2014",
+        "value": "Total",
+        "confidence": 0.99
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "B6",
+        "formula": "=SUM(B3:B5)",
+        "value": "5100",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "C6",
+        "formula": "=SUM(C3:C5)",
+        "value": "5450",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "D6",
+        "formula": "=SUM(D3:D5)",
+        "value": "5250",
+        "confidence": 0.96
+      },
+      {
+        "sheet": "Q1 Plan",
+        "ref": "E6",
+        "formula": "=SUM(E3:E5)+'Actuals'!E6",
+        "value": "31270",
+        "confidence": 0.8
+      }
+    ],
+    "tableEmptyReason": null,
+    "checks": [
+      {
+        "name": "cross-sheet-references-resolve",
+        "passed": false,
+        "detail": "Q1 Plan!F3 \u2192 Forecast Q4!B3 (sheet not found); Q1 Plan!E6 \u2192 Actuals!E6 (resolved)"
+      },
+      {
+        "name": "totals-match-referenced-cells",
+        "passed": true,
+        "detail": "12 totals formula(s) checked. Actuals!E3: independent sum=3780, formula value=3780; Actuals!E4: independent sum=8900, formula value=8900; Actuals!E5: independent sum=2790, formula value=2790; Actuals!B6: independent sum=4980, formula value=4980; Actuals!C6: independent sum=5350, formula value=5350; Actuals!D6: independent sum=5140, formula value=5140; Q1 Plan!E3: independent sum=3900, formula value=3900; Q1 Plan!E4: independent sum=9050, formula value=9050; Q1 Plan!E5: independent sum=2850, formula value=2850; Q1 Plan!B6: independent sum=5100, formula value=5100; Q1 Plan!C6: independent sum=5450, formula value=5450; Q1 Plan!D6: independent sum=5250, formula value=5250"
+      }
+    ],
+    "realArtifact": {
+      "artifact": "budget_test",
+      "kind": "spreadsheet",
+      "adapter": "Spreadsheet adapter",
+      "source": {
+        "path": "C:\\Users\\manan\\Desktop\\project\\nexDoc\\tests\\fixtures\\budget_test.xlsx",
+        "hash": "sha256:dbd0a5e970616451a72244f3ea73a6f7d765edcc90a46661467e89072e5e29a0",
+        "adapter_version": "0.1.0"
+      },
+      "regions": [
+        {
+          "id": "Actuals!A1",
+          "type": "title",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Q1 Actuals",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!A2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Category",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!B2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Jan",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!C2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Feb",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!D2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Mar",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!E2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Total",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!A3",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Marketing",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!B3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1150",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!C3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1380",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!D3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1250",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!E3",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B3:D3) \u2192 3780",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D3"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!A4",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Engineering",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!B4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "2950",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!C4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "3050",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!D4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "2900",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!E4",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B4:D4) \u2192 8900",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D4"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!A5",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Sales",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!B5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "880",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!C5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "920",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!D5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "990",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!E5",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B5:D5) \u2192 2790",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B5"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C5"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D5"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!A6",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Total",
+          "relationships": []
+        },
+        {
+          "id": "Actuals!B6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B3:B5) \u2192 4980",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!B5"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!C6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(C3:C5) \u2192 5350",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!C5"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!D6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(D3:D5) \u2192 5140",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!D5"
+            }
+          ]
+        },
+        {
+          "id": "Actuals!E6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(E3:E5) \u2192 15470",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Actuals!E3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!E4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Actuals!E5"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!A1",
+          "type": "title",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Q1 Budget Plan",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!A2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Category",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!B2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Jan",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!C2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Feb",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!D2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Mar",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!E2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Total",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!F2",
+          "type": "header",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Forecast link",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!A3",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Marketing",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!B3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1200",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!C3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1400",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!D3",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1300",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!E3",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B3:D3) \u2192 3900",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D3"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!F3",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.4,
+          "text": "='Forecast Q4'!B3 \u2192 unresolved (sheet not found)",
+          "relationships": [
+            {
+              "type": "cross-sheet-ref",
+              "target": "Forecast Q4!B3"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!A4",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Engineering",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!B4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "3000",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!C4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "3100",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!D4",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "2950",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!E4",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B4:D4) \u2192 9050",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D4"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!A5",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Sales",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!B5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "900",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!C5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "950",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!D5",
+          "type": "value",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "1000",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!E5",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B5:D5) \u2192 2850",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B5"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C5"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D5"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!A6",
+          "type": "label",
+          "shape": null,
+          "language": null,
+          "confidence": 0.99,
+          "text": "Total",
+          "relationships": []
+        },
+        {
+          "id": "Q1 Plan!B6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(B3:B5) \u2192 5100",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!B5"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!C6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(C3:C5) \u2192 5450",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!C5"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!D6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.96,
+          "text": "=SUM(D3:D5) \u2192 5250",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!D5"
+            }
+          ]
+        },
+        {
+          "id": "Q1 Plan!E6",
+          "type": "formula-cell",
+          "shape": null,
+          "language": null,
+          "confidence": 0.8,
+          "text": "=SUM(E3:E5)+'Actuals'!E6 \u2192 31270",
+          "relationships": [
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!E3"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!E4"
+            },
+            {
+              "type": "formula-ref",
+              "target": "Q1 Plan!E5"
+            },
+            {
+              "type": "cross-sheet-ref",
+              "target": "Actuals!E6"
+            }
+          ]
+        }
+      ],
+      "checks": [
+        {
+          "name": "cross-sheet-references-resolve",
+          "passed": false,
+          "detail": "Q1 Plan!F3 \u2192 Forecast Q4!B3 (sheet not found); Q1 Plan!E6 \u2192 Actuals!E6 (resolved)"
+        },
+        {
+          "name": "totals-match-referenced-cells",
+          "passed": true,
+          "detail": "12 totals formula(s) checked. Actuals!E3: independent sum=3780, formula value=3780; Actuals!E4: independent sum=8900, formula value=8900; Actuals!E5: independent sum=2790, formula value=2790; Actuals!B6: independent sum=4980, formula value=4980; Actuals!C6: independent sum=5350, formula value=5350; Actuals!D6: independent sum=5140, formula value=5140; Q1 Plan!E3: independent sum=3900, formula value=3900; Q1 Plan!E4: independent sum=9050, formula value=9050; Q1 Plan!E5: independent sum=2850, formula value=2850; Q1 Plan!B6: independent sum=5100, formula value=5100; Q1 Plan!C6: independent sum=5450, formula value=5450; Q1 Plan!D6: independent sum=5250, formula value=5250"
+        }
+      ]
+    }
+  }
+];
+
+const STAGES = [
+  { label:'Detect artifact type', detail:'Every file is classified before anything else runs: document, spreadsheet, diagram, or a registered custom type.' },
+  { label:'Route to adapter', detail:'Each type has its own extractor — layout-aware OCR for documents, formula-aware parsing for spreadsheets, shape-and-connector detection for diagrams.' },
+  { label:'Native structure extraction', detail:'The adapter reads the artifact in its own terms: reading order and tables, or cell formulas and dependencies, or nodes and connections — not flattened to prose first.' },
+  { label:'Map to common schema', detail:'Every adapter\'s output lands in the same node-and-relationship schema, so downstream systems only need to understand one format, not four.' },
+  { label:'Confidence QA & validate', detail:'Each node and relationship is scored individually — text confidence, formula-reference confidence, or connection-topology confidence — and anything below threshold is flagged for review.' },
+  { label:'Package & benchmark', detail:'Structured output ships alongside a measured comparison against a naive flatten-to-text baseline, so "better" is a number, not a claim.' }
+];
+
+let activeDocId = DOCS[0].id;
+let activeTab = 'text';
+let activeRegionId = null;
+
+function currentDoc(){ return DOCS.find(d => d.id === activeDocId); }
+
+function renderPicker(){
+  const list = document.getElementById('pickerList');
+  list.innerHTML = '';
+  DOCS.forEach(doc => {
+    const btn = document.createElement('button');
+    btn.className = 'doc-chip';
+    btn.type = 'button';
+    btn.setAttribute('aria-pressed', doc.id === activeDocId ? 'true' : 'false');
+    btn.innerHTML = '<strong>' + doc.title + '</strong><span>' + doc.meta + '</span>';
+    btn.addEventListener('click', () => selectDoc(doc.id, true));
+    list.appendChild(btn);
+  });
+}
+
+function renderPreview(runScan){
+  const doc = currentDoc();
+  const frame = document.getElementById('pageFrame');
+  frame.querySelectorAll('.region').forEach(el => el.remove());
+  frame.querySelectorAll('.diagram-lines').forEach(el => el.remove());
+  frame.classList.toggle('grid-bg', doc.kind === 'spreadsheet');
+
+  if(doc.kind === 'diagram' && doc.connectors){
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS,'svg');
+    svg.setAttribute('class','diagram-lines');
+    svg.setAttribute('viewBox','0 0 100 100');
+    svg.setAttribute('preserveAspectRatio','none');
+    let inner = '<defs><marker id="arrowhd" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M1 1L7 4L1 7Z" fill="' + 'currentColor' + '"/></marker></defs>';
+    doc.connectors.forEach(c => {
+      inner += '<line x1="'+c.x1+'" y1="'+c.y1+'" x2="'+c.x2+'" y2="'+c.y2+'" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrowhd)"/>';
+    });
+    svg.innerHTML = inner;
+    svg.style.color = 'var(--line-strong)';
+    frame.appendChild(svg);
+  }
+
+  doc.regions.forEach(r => {
+    const el = document.createElement('div');
+    let cls = 'region';
+    if(r.confidence < 0.85) cls += ' low';
+    if(r.id === activeRegionId) cls += ' active';
+    if(r.shape) cls += ' shape-' + r.shape;
+    el.className = cls;
+    el.style.top = r.box.top + '%';
+    el.style.left = r.box.left + '%';
+    el.style.width = r.box.width + '%';
+    el.style.height = r.box.height + '%';
+    el.title = r.typeLabel;
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('aria-label', r.typeLabel + (r.text ? ': ' + r.text : ' (non-text region)'));
+    const tag = document.createElement('span');
+    tag.className = 'region-label';
+    tag.textContent = r.typeLabel;
+    el.appendChild(tag);
+    el.addEventListener('click', () => selectRegion(r.id));
+    el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectRegion(r.id); } });
+    frame.appendChild(el);
+  });
+
+  if(runScan){
+    const line = document.getElementById('scanline');
+    line.classList.remove('run');
+    void line.offsetWidth;
+    line.classList.add('run');
+  }
+}
+
+function selectRegion(id){
+  activeRegionId = (activeRegionId === id) ? null : id;
+  renderPreview(false);
+  renderActiveTab();
+}
+
+function selectDoc(id, runScan){
+  activeDocId = id;
+  activeRegionId = null;
+  renderPicker();
+  renderPreview(runScan);
+  renderActiveTab();
+  runLivePanel();
+}
+
+function confBadge(c){
+  const pct = Math.round(c * 100) + '%';
+  const cls = c < 0.85 ? 'conf-low' : 'conf-high';
+  return '<span class="badge ' + cls + '">' + pct + (c < 0.85 ? ' · review' : '') + '</span>';
+}
+
+function renderText(){
+  const doc = currentDoc();
+  const panel = document.getElementById('panel-text');
+  const lines = doc.regions.map(r => r.text ? r.text : '[' + r.typeLabel + ' — excluded, non-text]').join('\n');
+  panel.innerHTML = '<span class="muted">' + doc.pageLabel + ' · flattened for search indexing</span>\n\n' + escapeHtml(lines);
+}
+
+function renderStructured(){
+  const doc = currentDoc();
+  const panel = document.getElementById('panel-structured');
+  panel.innerHTML = '';
+  doc.regions.forEach(r => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'region-row' + (r.confidence < 0.85 ? ' low' : '') + (r.id === activeRegionId ? ' active' : '');
+    const langBadge = r.lang ? '<span class="badge lang">' + r.lang + '</span>' : '';
+    row.innerHTML =
+      '<div class="row-text">' + (r.text ? escapeHtml(r.text) : '<span class="native">non-text region</span>') +
+      '<span class="native">' + r.typeLabel + '</span></div>' +
+      '<div class="badge-col">' + langBadge + confBadge(r.confidence) + '</div>';
+    row.addEventListener('click', () => selectRegion(r.id));
+    panel.appendChild(row);
+  });
+}
+
+function renderJson(){
+  const doc = currentDoc();
+  const panel = document.getElementById('panel-json');
+  let text = JSON.stringify(doc.realArtifact, null, 2);
+  text = escapeHtml(text)
+    .replace(/"([a-zA-Z_]+)":/g, '<span class="k">"$1"</span>:')
+    .replace(/: "([^"]*)"/g, ': <span class="s">"$1"</span>');
+  panel.innerHTML = text;
+}
+
+function renderTable(){
+  const doc = currentDoc();
+  const panel = document.getElementById('panel-table');
+  if(!doc.table || !doc.table.length){
+    panel.innerHTML = '<div class="empty-state">' + (doc.tableEmptyReason || 'No tabular data in this artifact.') + '<br>Table export stays empty rather than guessing.</div>';
+    return;
+  }
+  const cols = doc.tableColumns;
+  const rows = doc.table.map(row => '<tr>' + cols.map(c => {
+    let v = row[c];
+    if(c === 'confidence') v = Math.round(v*100) + '%';
+    if(v === null || v === undefined) v = '—';
+    return '<td>' + escapeHtml(String(v)) + '</td>';
+  }).join('') + '</tr>').join('');
+  panel.innerHTML = '<table class="extract-table"><thead><tr>'+cols.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows+'</tbody></table>';
+}
+
+function renderActiveTab(){
+  renderText();
+  renderStructured();
+  renderJson();
+  renderTable();
+  renderChecks();
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+function initTabs(){
+  const buttons = document.querySelectorAll('.tab-btn');
+  buttons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeTab = btn.dataset.tab;
+      buttons.forEach(b => b.setAttribute('aria-selected', b === btn ? 'true' : 'false'));
+      ['text','structured','json','table'].forEach(name => {
+        document.getElementById('panel-' + name).hidden = (name !== activeTab);
+      });
+    });
+  });
+}
+
+function renderStepper(){
+  const stepper = document.getElementById('stepper');
+  const detail = document.getElementById('stepDetail');
+  stepper.innerHTML = '';
+  STAGES.forEach((stage, i) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'step-btn';
+    btn.setAttribute('aria-pressed', i === 0 ? 'true' : 'false');
+    btn.innerHTML = '<span class="step-num">' + (i+1) + '</span><span class="step-label">' + stage.label + '</span>';
+    btn.addEventListener('click', () => {
+      stepper.querySelectorAll('.step-btn').forEach(b => b.setAttribute('aria-pressed','false'));
+      btn.setAttribute('aria-pressed','true');
+      detail.textContent = stage.detail;
+    });
+    stepper.appendChild(btn);
+  });
+  detail.textContent = STAGES[0].detail;
+}
+
+document.getElementById('replayBtn').addEventListener('click', () => { renderPreview(true); runLivePanel(); });
+
+/* ---------- live processing side panel ---------- */
+let liveTimer = null;
+
+function setLiveStatus(state, label){
+  const el = document.getElementById('liveStatus');
+  el.className = 'live-status' + (state ? ' ' + state : '');
+  document.getElementById('liveStatusText').textContent = label;
+}
+
+function runLivePanel(){
+  if(liveTimer){ clearInterval(liveTimer); liveTimer = null; }
+  const doc = currentDoc();
+  const body = document.getElementById('liveTableBody');
+  const pending = document.getElementById('livePending');
+  body.innerHTML = '';
+  pending.hidden = false;
+  document.getElementById('liveCount').textContent = '0 / ' + doc.regions.length + ' regions';
+  document.getElementById('liveRoute').innerHTML = 'routed to: <strong>' + doc.adapter + '</strong>';
+  setLiveStatus('running', 'processing ' + doc.title.toLowerCase() + '…');
+
+  let i = 0;
+  liveTimer = setInterval(() => {
+    if(i >= doc.regions.length){
+      clearInterval(liveTimer); liveTimer = null;
+      pending.hidden = true;
+      setLiveStatus('done', 'done — ' + doc.regions.length + ' regions');
+      return;
+    }
+    const r = doc.regions[i];
+    const row = document.createElement('tr');
+    row.className = 'live-row' + (r.confidence < 0.85 ? ' low' : '');
+    const valueHtml = r.text
+      ? '<span class="field-value">' + escapeHtml(r.text) + '</span>'
+      : '<span class="field-value muted">non-text region</span>';
+    row.innerHTML =
+      '<td><span class="field-name">' + r.typeLabel + (r.lang ? ' · ' + r.lang : '') + '</span>' + valueHtml + '</td>' +
+      '<td><span class="live-conf ' + (r.confidence < 0.85 ? 'low' : 'high') + '">' + Math.round(r.confidence*100) + '%' + (r.confidence < 0.85 ? ' · review' : '') + '</span></td>';
+    body.appendChild(row);
+    document.getElementById('liveTableBody').parentElement.parentElement.scrollTop = 999999;
+    i++;
+    document.getElementById('liveCount').textContent = i + ' / ' + doc.regions.length + ' regions';
+  }, 550);
+}
+
+document.getElementById('liveJsonLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('tabBtn-json').click();
+  document.getElementById('tabBtn-json').scrollIntoView({ behavior:'smooth', block:'center' });
+});
+
+renderPicker();
+renderPreview(true);
+renderActiveTab();
+initTabs();
+renderStepper();
+runLivePanel();
+
+function renderChecks(){
+  const doc = currentDoc();
+  const strip = document.getElementById('checksStrip');
+  if(!doc.checks || !doc.checks.length){ strip.innerHTML = ''; return; }
+  strip.innerHTML = '<span class="checks-strip-label">Validation checks — artifact-level, independent of per-region confidence</span>' +
+    doc.checks.map(c => {
+      const cls = c.passed ? 'pass' : 'fail';
+      const mark = c.passed ? '\u2713' : '\u2715';
+      return '<div class="check-badge ' + cls + '"><span class="mark">' + mark + '</span>' +
+        '<div class="body"><strong>' + escapeHtml(c.name) + '</strong><span>' + escapeHtml(c.detail) + '</span></div></div>';
+    }).join('');
+}
+</script>
+</body>
+</html>

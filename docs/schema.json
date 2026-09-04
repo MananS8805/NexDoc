@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://internal/semantic-preprocessing-pipeline/artifact.schema.json",
+  "title": "Semantic Preprocessing Pipeline — common artifact schema",
+  "description": "The one schema every adapter converges on (see /CLAUDE.md, 'Common schema'). This is what proves reusability is real: adding a new artifact type means writing an adapter that produces this exact shape, not inventing a new one. Validated in practice by tests/test_schema_conformance.py against real output from all three adapters (spreadsheet, document, diagram) — not just written to look plausible.",
+  "type": "object",
+  "required": ["artifact", "kind", "adapter", "source", "regions", "checks"],
+  "additionalProperties": false,
+  "properties": {
+    "artifact": {
+      "type": "string",
+      "description": "Human-readable title for this artifact — in practice the source file's stem (e.g. 'budget_test', 'invoice_born_digital')."
+    },
+    "kind": {
+      "type": "string",
+      "description": "Which family of adapter produced this. Not an enum on purpose: CLAUDE.md's whole reusability claim is that a new adapter (a 5th artifact type, say) can introduce a new kind value without touching this schema. Currently produced values: 'spreadsheet', 'document', 'diagram'."
+    },
+    "adapter": {
+      "type": "string",
+      "description": "Which adapter produced this, e.g. 'Spreadsheet adapter'. Human-readable, shown directly in the UI's live-processing panel ('routed to: <adapter>')."
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "regions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/region" },
+      "description": "The extracted content, in reading order. Every adapter's four output shapes (text/structured/json/table — see adapters/common/outputs.py) are pure reshapes of this one array; nothing downstream re-extracts from the source file."
+    },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/check" },
+      "description": "Artifact-level sanity checks, independent of any single region's confidence (CLAUDE.md's guardrail: a failed check is not the same as low confidence — both are tracked, never collapsed into one signal)."
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "required": ["path", "hash", "adapter_version"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "description": "Filesystem path to the original source file, as given to the adapter." },
+        "hash": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "sha256 of the exact source file bytes, prefixed 'sha256:'. Real provenance, not a placeholder — recomputed from the file every run (adapters.common.schema.sha256_of_file), never cached or trusted from a prior run."
+        },
+        "adapter_version": { "type": "string", "description": "The producing adapter's own version string, e.g. '0.1.0'." }
+      }
+    },
+    "region": {
+      "type": "object",
+      "required": ["id", "type", "shape", "language", "confidence", "text", "relationships"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique within this artifact. Convention varies by adapter but is always locational: 'Sheet!A1' (spreadsheet), 'page1!block3' or 'page1!ocr-line2' (document), 'node-1'/'edge-1' (diagram) — an id always tells you roughly where in the source this region came from."
+        },
+        "type": {
+          "type": "string",
+          "description": "Semantic role, adapter-defined (e.g. 'header', 'formula-cell', 'line-item', 'node', 'edge'). Deliberately not an enum here either, for the same reusability reason as 'kind'."
+        },
+        "shape": {
+          "type": ["string", "null"],
+          "description": "Visual/structural hint. Only diagrams currently set this ('node', 'node-decision', 'edge'); every other adapter's regions carry null, since the concept doesn't apply."
+        },
+        "language": {
+          "type": ["string", "null"],
+          "description": "BCP-47 language code when detected from real text content (langdetect, a real statistical model — never guessed or defaulted to a fixed value). null when not applicable: non-text regions, structured/tabular content where 'language' is a category error, or text too short to detect reliably."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Real extraction certainty, backed by an actual signal from that adapter's parser/detector/OCR engine — never a hardcoded constant chosen to look reasonable. What the signal actually is varies by adapter and is documented in each adapter's README (e.g. spreadsheet: formula resolution tier; document: text-layer-present vs. OCR engine confidence; diagram: polygon-approximation cleanliness for nodes, arrowhead-density asymmetry for edges)."
+        },
+        "text": {
+          "type": ["string", "null"],
+          "description": "Human-readable content. null for a genuinely non-text region (a diagram node/edge with no OCR'd label, a scanned page Tesseract couldn't process) — never an empty string standing in for 'nothing here.'"
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/relationship" },
+          "description": "Real structural links to other regions in this same artifact, e.g. formula-ref / cross-sheet-ref (spreadsheet), sums-line-items (document), connects-to (diagram, exactly two per edge: [from, to] in that order — adapters.common.outputs._table_diagram relies on this ordering)."
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["type", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "description": "e.g. 'formula-ref', 'cross-sheet-ref', 'sums-line-items', 'connects-to'." },
+        "target": { "type": "string", "description": "The id of another region in the same artifact's regions array." }
+      }
+    },
+    "check": {
+      "type": "object",
+      "required": ["name", "passed", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "e.g. 'cross-sheet-references-resolve', 'total-matches-line-items', 'edges-reference-existing-nodes', 'ocr-engine-available'." },
+        "passed": { "type": "boolean" },
+        "detail": {
+          "type": "string",
+          "description": "Human-readable explanation of what was actually checked and what was found — real values (e.g. 'independent sum=4980, formula value=4980'), not a static message that's the same whether the check passed or failed."
+        }
+      }
+    }
+  }
+}

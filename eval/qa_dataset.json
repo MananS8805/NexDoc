@@ -1,0 +1,50 @@
+[
+  {
+    "id": "q1",
+    "question": "In the 'Q1 Plan' sheet, what is the Total (column E) for the Marketing row?",
+    "check": "cell_value",
+    "sheet": "Q1 Plan",
+    "ref": "E3",
+    "expect_substring": "3900"
+  },
+  {
+    "id": "q2",
+    "question": "In the 'Actuals' sheet, what is the Jan total across all categories (cell B6)?",
+    "check": "cell_value",
+    "sheet": "Actuals",
+    "ref": "B6",
+    "expect_substring": "4980"
+  },
+  {
+    "id": "q3",
+    "question": "What is the grand total value in 'Q1 Plan' cell E6?",
+    "check": "cell_value",
+    "sheet": "Q1 Plan",
+    "ref": "E6",
+    "expect_substring": "31270"
+  },
+  {
+    "id": "q4",
+    "question": "Besides its own sheet, what other sheet does 'Q1 Plan' cell E6 pull data from?",
+    "check": "cross_sheet_ref",
+    "sheet": "Q1 Plan",
+    "ref": "E6",
+    "expect_substring": "Actuals"
+  },
+  {
+    "id": "q5",
+    "question": "Does 'Q1 Plan' cell F3 resolve to a valid value? If not, why not?",
+    "check": "unresolved_reason",
+    "sheet": "Q1 Plan",
+    "ref": "F3",
+    "expect_substring": "not found"
+  },
+  {
+    "id": "q6",
+    "question": "In the 'Q1 Plan' sheet, what is the Total (column E) for the Engineering row?",
+    "check": "cell_value",
+    "sheet": "Q1 Plan",
+    "ref": "E4",
+    "expect_substring": "9050"
+  }
+]
