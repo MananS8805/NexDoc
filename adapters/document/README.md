@@ -65,52 +65,111 @@ This is stated here rather than implied to work generally.
 
 | type                      | meaning                                                    | confidence |
 |---------------------------|-------------------------------------------------------------|------------|
-| `ocr-line`                | one line of OCR'd text, grouped by Tesseract's own block/paragraph/line numbering | mean of that line's word-level OCR confidences ÷ 100 |
-| `scanned-page-unprocessed`| the page needed OCR but Tesseract wasn't available on this machine | 0.0 |
+| `ocr-line`                | one visual line of OCR'd text, grouped from EasyOCR's individual text-box detections by `adapters.common.ocr.group_detections_into_lines` | mean of that line's per-detection EasyOCR confidences |
+| `scanned-page-unprocessed`| the page needed OCR but the OCR engine wasn't available on this machine | 0.0 |
 
 `ocr-line` confidence is the only place per-region confidence actually
 varies within a document, because it's a real signal that varies per line —
 never a hardcoded number. `0.0` for an unprocessed page is not "very
 unconfident text" — it means no text was extracted at all, honestly.
 
-## OCR engine — real limitations, stated plainly
+## OCR engine — EasyOCR (switched from pytesseract/Tesseract), real limitations stated plainly
 
-This adapter uses **pytesseract / Tesseract**, a real, free, locally
-installable OCR engine — not a production-grade layout-aware VLM (e.g.
-PaddleOCR-VL, Marker). That's a deliberate choice for a prototype, and it
-comes with real accuracy limits worth being explicit about:
+This adapter used to run OCR through **pytesseract / Tesseract**. It now
+uses **EasyOCR** (pure Python + PyTorch, Apache-2.0) instead, via the
+shared wrapper in `adapters/common/ocr.py`. This was a real bug fix, not a
+style preference — two concrete, confirmed problems with the old path:
 
-- Tesseract has no layout understanding — it reads left-to-right,
-  top-to-bottom per its own line grouping, with no notion of multi-column
-  layout, tables-as-structure, or reading order beyond simple geometry.
-- Accuracy on handwriting, low-resolution scans, or unusual fonts is
-  meaningfully worse than a modern VLM-based OCR pipeline.
-- Language support depends on which Tesseract language packs are installed
-  (`tessdata`); a language pack that isn't installed will produce garbled
-  or empty output for that script, not a clear error, unless separately
-  checked for.
+1. **Tesseract is a system binary, not a Python package.** `pytesseract`
+   is just a thin wrapper around it; installing the actual OCR engine
+   requires an OS-level install, which needs admin/elevation on a machine
+   that doesn't have it already — a hard, unresolvable blocker in some
+   environments, unrelated to anything about the adapter's own code.
+   EasyOCR is `pip install easyocr`, full stop — no system binary, no
+   elevation.
+2. **The old OCR call site never passed a language.** `pytesseract.image_to_data`
+   was called with no `lang=` argument anywhere, so every scanned page was
+   OCR'd with whatever Tesseract's default language pack was (English)
+   regardless of the page's actual script — and most environments (this
+   one included) only ever have the `eng` Tesseract pack installed, so a
+   non-Latin script would have produced garbage even if Tesseract itself
+   *could* read it in principle, given the right pack. This was verified,
+   not theorized: `tests/fixtures/note_scanned.pdf` has a Devanagari
+   (Hindi) line specifically to exercise this, and it came back as
+   `Ae Ot od @ se YT ENT` under the old code path. With EasyOCR's `Reader`
+   built for `["en", "hi"]` (see `DEFAULT_LANGUAGES` in
+   `adapters/common/ocr.py`), the same fixture, same line, now comes back
+   as `माल की जांच के बाद भुगतान होगा|` — real, readable Devanagari (one
+   character off: the sentence-final `।` danda was read as a `|` pipe,
+   which is a minor per-character confusion, not a script failure).
+
+**Tesseract was removed rather than kept as a fallback.** Two OCR code
+paths — two "is it installed" checks, two confidence scales, two sets of
+per-language-pack quirks — is real, ongoing complexity for marginal
+benefit here: Tesseract's accuracy and script coverage were already the
+weaker of the two, so nothing correctness-relevant is lost, and EasyOCR's
+only real downsides (a much larger dependency, slower CPU inference — see
+below) apply either way once `easyocr`/`torch` are installed at all.
+
+Real, honestly-stated limitations of the new engine:
+
+- **`torch` is a large dependency.** `pip install easyocr` pulls in
+  PyTorch and (on Linux) its CUDA wheels even though this adapter only
+  ever runs on CPU (`gpu=False`) — expect a multi-hundred-MB to ~1GB+
+  install, materially bigger than pytesseract's footprint. Inference
+  itself is fully offline at runtime either way; the size cost is at
+  install time, not per-request network use.
+- **First-run model download.** The first time a given language
+  combination (`en`+`hi` by default) is used on a machine, EasyOCR
+  downloads its detector (~85MB, `craft_mlt_25k.pth`) and a
+  language-appropriate recognition model (~215MB for the Devanagari
+  model, which also covers Latin) to `~/.EasyOCR/model/`, cached
+  thereafter (~285MB total observed for the default language pair). That
+  download took about 50 seconds in this environment; a slower connection
+  or a machine with no cached copy of an already-downloaded language
+  combination will pay it again. There is no bundled offline installer —
+  a machine with zero network access at all cannot complete this one-time
+  step, which is a real (if narrower) constraint compared to shipping
+  model weights alongside the package.
+- **CPU inference is slow, measured directly on this environment (no
+  GPU)**: reading a full `note_scanned.pdf` page (1654×2339px, rendered at
+  200dpi) took **~49 seconds**; a smaller flowchart-sized image
+  (900×700px, `tests/fixtures/flowchart_clean.png`) took **~5.6 seconds**;
+  loading the `Reader` itself (after models are already cached) took
+  **~5-6 seconds** per process. This is meaningfully slower than
+  Tesseract's near-instant CPU OCR, and is the real cost of a
+  neural-network-based OCR engine without a GPU. `adapters/common/ocr.py`
+  caches the `Reader` per-process and only builds/probes it lazily (the
+  first time a page or label actually needs OCR) so a document with no
+  scanned pages, or a diagram with no nodes/edges, never pays this cost at
+  all — see its `_iter_regions` for both adapters.
+- **Only the languages actually loaded get read correctly.** The default
+  `Reader` is built for `["en", "hi"]` — English because it's the lingua
+  franca of scanned business documents, Hindi/Devanagari because that's
+  the second script this repo's own fixtures exercise. A page in a third
+  script (e.g. Chinese, Arabic) will still get *a* result — EasyOCR
+  doesn't crash on out-of-vocabulary characters — but it will be
+  misrecognized the same structural way the old English-only Tesseract
+  call misread Hindi, just with a different (and larger — EasyOCR
+  supports 80+ languages) escape hatch: pass a different `languages` list
+  to `get_reader`/`ocr_engine_status` for a different script mix. This
+  isn't wired to a config file or environment variable yet.
+- Neither engine has real layout understanding — EasyOCR's *detector*
+  finds individual text boxes with no notion of column layout or table
+  structure; `group_detections_into_lines` (a real geometric
+  vertical-overlap clustering, not a hardcoded line count) recovers
+  Tesseract-style "lines" from those boxes for `ocr-line` regions, but
+  this is still simple top-to-bottom/left-to-right geometry, not real
+  layout analysis.
+- Accuracy on handwriting or very degraded scans is still not claimed to
+  match a production layout-aware VLM (e.g. PaddleOCR-VL, Marker) — that
+  remains out of scope for this prototype, same as it was with Tesseract.
 
 None of this is implied to be production-grade elsewhere in this repo — the
 UI prototype's "why it's better than flattening" section only ever shows a
 *measured* number for the spreadsheet adapter, and stays illustrative for
 documents (see `adapters/spreadsheet/README.md`'s eval section and
 `docs/eval-methodology.md`).
-
-**Environment-specific fact, not an adapter limitation**: the machine this
-adapter was built and tested on does not have the Tesseract binary
-installed, and installing system-wide software requires elevation this
-session doesn't have (a `choco install` attempt failed on a permissions
-lock; downloading and running a portable installer `.exe` from the web is
-explicitly out of bounds regardless of authorization). `pytesseract` is
-installed and the OCR code path is real and complete — it has simply never
-been exercised end-to-end with an actual OCR result on this machine. The
-adapter detects this itself (`_tesseract_status()`, checked once per
-process via `pytesseract.get_tesseract_version()`) and reports it honestly
-through the `ocr-engine-available` check rather than crashing or
-fabricating OCR text. On a machine with Tesseract installed, the exact same
-code produces real `ocr-line` regions with real per-line confidence instead
-of the `scanned-page-unprocessed` fallback — nothing else about the adapter
-needs to change.
 
 ## Checks
 
@@ -125,13 +184,17 @@ Three artifact-level checks, per `Check{name, passed, detail}`:
   region's text is parsed with `datetime.strptime`; fails if any date-like
   string doesn't parse as a real calendar date. Passes trivially when no
   date-like text is found.
-- **`ocr-engine-available`** — records whether Tesseract was actually
-  reachable on this machine when the artifact was built, and how many
-  scanned pages (if any) were affected. This is not a property of the PDF —
-  it's a property of the environment, tracked the same way a failed
-  validation check is tracked independently of confidence (CLAUDE.md's
-  guardrail): a document can have all its own checks pass and still have
-  this one fail if OCR wasn't available.
+- **`ocr-engine-available`** — records whether EasyOCR was actually usable
+  on this machine when the artifact was built, and how many scanned pages
+  (if any) were affected. This is not a property of the PDF — it's a
+  property of the environment, tracked the same way a failed validation
+  check is tracked independently of confidence (CLAUDE.md's guardrail): a
+  document can have all its own checks pass and still have this one fail
+  if OCR wasn't available. For a document with no scanned pages at all,
+  this check passes with `"not checked"` rather than actually loading
+  EasyOCR's model weights — see `adapters/common/ocr.py` and
+  `_iter_regions`'s lazy-probe comment for why forcing that load would be
+  pure waste for a document that never needed OCR in the first place.
 
 ## Known limitations (Phase 2 scope, not bugs)
 
@@ -147,7 +210,7 @@ Three artifact-level checks, per `Check{name, passed, detail}`:
   short-string statistical language ID, not something this adapter works
   around by guessing.
 - No table-structure detection, no multi-column layout handling, no
-  handwriting-specific handling beyond whatever Tesseract itself does.
+  handwriting-specific handling beyond whatever EasyOCR itself does.
 - No LLM cleanup pass touches extracted text anywhere in this adapter, per
   CLAUDE.md's guardrail.
 

@@ -26,15 +26,20 @@ verifiable by running the commands.
 Not built, and explicitly out of scope for this stage: auth/roles/reviewer
 workflow, a live server, hosting, a database. Output is static files only.
 
-**Environment-specific, honest caveat**: the machine this was built on does
-not have the Tesseract OCR binary installed (only the `pytesseract` Python
-package is), and installing system-wide software requires elevation this
-session doesn't have. Every OCR-dependent code path is real and complete —
-it has simply never produced a real OCR'd result *on this machine*. Each
-adapter detects this itself and reports it honestly through an
-`ocr-engine-available` check rather than crashing or fabricating text. On a
-machine with Tesseract installed, the exact same code produces real OCR
-output instead. Details: [`adapters/document/README.md`](adapters/document/README.md#ocr-engine--real-limitations-stated-plainly).
+**OCR engine: EasyOCR, not Tesseract.** The document and diagram adapters'
+OCR path used to run through pytesseract/Tesseract, which had two real,
+confirmed problems — installing Tesseract's system binary needs elevation
+some environments don't have, and the old code never passed a language
+argument, so non-English scripts (verified on this repo's own Hindi test
+fixture) came back as garbage. Both are fixed by switching to EasyOCR
+(pure Python + PyTorch, no system binary, configured for English + Hindi
+by default, real per-detection confidence, fully offline at inference
+time after a one-time model download). This does trade Tesseract's
+near-instant CPU OCR for EasyOCR's much slower one — real, measured CPU
+timings are in `adapters/document/README.md`. Each adapter still detects
+and reports OCR availability honestly through the same
+`ocr-engine-available` check as before, never crashing or fabricating
+text. Details: [`adapters/document/README.md`](adapters/document/README.md#ocr-engine--easyocr-switched-from-pytesseracttesseract-real-limitations-stated-plainly).
 
 ## Quickstart
 
@@ -107,7 +112,7 @@ adapters/
   common/
     schema.py             the shared dataclasses (Region, Check, Artifact, ...)
     outputs.py             the four output-shape functions, pure functions over the schema
-    ocr.py                  shared Tesseract-availability probe (document + diagram)
+    ocr.py                  shared EasyOCR reader + availability probe (document + diagram)
   spreadsheet/adapter.py   .xlsx -> schema, formula-aware, no OCR, no model calls
   document/adapter.py      .pdf -> schema, hybrid text-layer / OCR
   diagram/adapter.py       .png/.jpg -> schema, OpenCV shape + line detection

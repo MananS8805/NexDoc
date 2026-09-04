@@ -3,9 +3,21 @@ anthropic>=0.40
 
 # Phase 2 — document adapter
 PyMuPDF>=1.24
-pytesseract>=0.3.10
 langdetect>=1.0.9
 Pillow>=10.0
+
+# OCR engine (shared by the document and diagram adapters via
+# adapters/common/ocr.py). EasyOCR replaced pytesseract/Tesseract here —
+# see adapters/common/ocr.py's module docstring and adapters/document/
+# README.md's "OCR engine" section for why. It's pure Python + PyTorch
+# (no system binary to install with elevation), and its recognition
+# models are picked per-language rather than depending on whatever OS
+# language packs happen to be present. This pulls in `torch` — a real,
+# large (~700MB+ with its CUDA wheels on Linux) dependency — but
+# inference itself runs fully offline/on-CPU with no network calls once
+# the one-time model download (~85MB detector + ~200MB per recognition
+# model, cached under ~/.EasyOCR) has happened.
+easyocr>=1.7.1
 
 # Phase 2 fixture generation only (not an adapter runtime dependency)
 reportlab>=4.0

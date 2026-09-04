@@ -50,8 +50,9 @@ Confidence:
       shape here" is a fundamentally more certain claim than "this shape
       connects to that one in this direction" — reconstructed topology, not
       a direct read.
-    - label text: Tesseract's own OCR confidence, exactly like the document
-      adapter — or 0.0 with text=None when Tesseract isn't available.
+    - label text: EasyOCR's own per-detection confidence, exactly like the
+      document adapter — or 0.0 with text=None when the OCR engine isn't
+      available.
 """
 
 from __future__ import annotations
@@ -62,10 +63,8 @@ from typing import Iterator
 
 import cv2
 import numpy as np
-import pytesseract
-from pytesseract import Output
 
-from adapters.common.ocr import tesseract_status
+from adapters.common.ocr import ocr_engine_status, read_label
 from adapters.common.schema import Artifact, Check, Region, Relationship, Source, sha256_of_file
 
 ADAPTER_NAME = "Diagram adapter"
@@ -381,30 +380,6 @@ def _detect_edges(binary_full: np.ndarray, binary_masked: np.ndarray, nodes: lis
     return edges
 
 
-def _ocr_label(image_bgr: np.ndarray, bbox: tuple[int, int, int, int], padding: int = 6) -> tuple[str | None, float]:
-    ok, _ = tesseract_status()
-    if not ok:
-        return None, 0.0
-    x0, y0, x1, y1 = bbox
-    h, w = image_bgr.shape[:2]
-    x0, y0 = max(0, x0 - padding), max(0, y0 - padding)
-    x1, y1 = min(w, x1 + padding), min(h, y1 + padding)
-    crop = image_bgr[y0:y1, x0:x1]
-    if crop.size == 0:
-        return None, 0.0
-    data = pytesseract.image_to_data(crop, output_type=Output.DICT)
-    words, confs = [], []
-    for i in range(len(data["text"])):
-        word = data["text"][i].strip()
-        conf = int(data["conf"][i])
-        if word and conf >= 0:
-            words.append(word)
-            confs.append(conf)
-    if not words:
-        return None, 0.0
-    return " ".join(words), round((sum(confs) / len(confs)) / 100, 4)
-
-
 def _ellipse_label_bbox(bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
     x0, y0, x1, y1 = bbox
     w, h = x1 - x0, y1 - y0
@@ -419,15 +394,19 @@ def _iter_regions(path: str | Path) -> Iterator[Region]:
     masked = _mask_out_nodes(binary, nodes)
     edges = _detect_edges(binary, masked, nodes)
 
-    tesseract_ok, _ = tesseract_status()
+    # Probed lazily, only if there's at least one node/edge that could carry
+    # a label — same reasoning as the document adapter's _iter_regions:
+    # ocr_engine_status() loads EasyOCR's model weights (real, multi-second
+    # work), which an image with nothing to label shouldn't have to pay for.
+    ocr_ok = ocr_engine_status()[0] if (nodes or edges) else False
     node_ids = []
     for i, node in enumerate(nodes):
         region_id = f"node-{i + 1}"
         node_ids.append(region_id)
         text, ocr_conf = (None, 0.0)
-        if tesseract_ok:
+        if ocr_ok:
             ocr_bbox = _ellipse_label_bbox(node["bbox"]) if node["shape"] == "node-circle" else node["bbox"]
-            text, ocr_conf = _ocr_label(image_bgr, ocr_bbox)
+            text, ocr_conf = read_label(image_bgr, ocr_bbox)
         yield Region(
             id=region_id,
             type="node",
@@ -439,10 +418,10 @@ def _iter_regions(path: str | Path) -> Iterator[Region]:
     for i, edge in enumerate(edges):
         region_id = f"edge-{i + 1}"
         text = None
-        if tesseract_ok:
+        if ocr_ok:
             mx, my = edge["midpoint"]
             label_bbox = (int(mx - 40), int(my - 20), int(mx + 40), int(my + 20))
-            text, _ = _ocr_label(image_bgr, label_bbox)
+            text, _ = read_label(image_bgr, label_bbox)
         yield Region(
             id=region_id,
             type="edge",
@@ -483,20 +462,24 @@ def _check_edges_reference_existing_nodes(regions: list[Region]) -> Check:
 
 
 def _check_ocr_engine_available(regions: list[Region]) -> Check:
-    ok, detail = tesseract_status()
     label_bearing = [r for r in regions if r.type in ("node", "edge")]
-    if ok:
-        return Check("ocr-engine-available", True, f"Tesseract {detail} available")
     if not label_bearing:
+        # No nodes/edges at all means _iter_regions never probed the OCR
+        # engine either (see its lazy-probe comment) — don't force an
+        # expensive EasyOCR model load here just to answer a question with
+        # no bearing on this (empty) image's actual output.
         return Check(
             "ocr-engine-available",
-            False,
-            f"Tesseract not available ({detail}) — no effect on this image, no nodes or edges were detected to label",
+            True,
+            "not checked — no nodes or edges were detected to label",
         )
+    ok, detail = ocr_engine_status()
+    if ok:
+        return Check("ocr-engine-available", True, detail)
     return Check(
         "ocr-engine-available",
         False,
-        f"Tesseract not available ({detail}) — {len(label_bearing)} node/edge label(s) could not be OCR'd; "
+        f"OCR engine not available ({detail}) — {len(label_bearing)} node/edge label(s) could not be OCR'd; "
         "shape and topology detection are unaffected, since they don't use OCR",
     )
 
