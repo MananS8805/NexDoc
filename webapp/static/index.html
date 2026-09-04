@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semantic preprocessing pipeline — local run</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <div class="mark">
+      <span class="mark-glyph" aria-hidden="true"></span>
+      <span class="mark-name">docpipe</span>
+    </div>
+    <span class="mock-tag">local run — real adapters, no server-side storage</span>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>Run a real file through the pipeline.</h1>
+    <p class="hero-sub">Drop a <code>.xlsx</code>, <code>.pdf</code>, or <code>.png</code>/<code>.jpg</code> file below. It's routed by real content sniffing to the same spreadsheet, document, or diagram adapter <code>run_adapter.py</code> uses, processed once, and shown here — nothing is stored on disk after the response comes back, and nothing you see is sample data.</p>
+
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose or drop a file to analyze">
+      <input type="file" id="fileInput" accept=".xlsx,.pdf,.png,.jpg,.jpeg" hidden>
+      <div class="dz-icon" aria-hidden="true">↑</div>
+      <div class="dz-text">
+        <strong>Drop a file here, or click to choose one</strong>
+        <span>.xlsx spreadsheet · .pdf document · .png/.jpg diagram</span>
+      </div>
+    </div>
+
+    <div class="status-row" id="statusRow" hidden>
+      <span class="live-status" id="liveStatus"><span class="live-dot"></span><span id="liveStatusText">idle</span></span>
+      <span id="statusFile" class="status-file"></span>
+    </div>
+
+    <div class="error-banner" id="errorBanner" hidden></div>
+  </section>
+
+  <section class="result" id="result" hidden>
+    <div class="result-head">
+      <div>
+        <h2 id="resultTitle"></h2>
+        <p class="result-meta" id="resultMeta"></p>
+      </div>
+      <span class="badge adapter-badge" id="resultAdapter"></span>
+    </div>
+
+    <div class="confidence-strip" id="confidenceStrip"></div>
+    <div class="checks-strip" id="checksStrip"></div>
+
+    <div class="demo">
+      <div class="preview-col">
+        <h3>Input preview</h3>
+        <div class="page-frame" id="pageFrame">
+          <div class="scanline" id="scanline"></div>
+          <div class="empty-state" id="noPreview" hidden>No positional preview available for this file — see the <strong>structured</strong> tab for the full region list.</div>
+        </div>
+      </div>
+
+      <div class="output-col">
+        <h3>Extracted output</h3>
+        <div class="tabs" role="tablist" aria-label="Output format">
+          <button class="tab-btn" id="tabBtn-text" role="tab" aria-selected="true" data-tab="text" type="button">text</button>
+          <button class="tab-btn" id="tabBtn-structured" role="tab" aria-selected="false" data-tab="structured" type="button">structured</button>
+          <button class="tab-btn" id="tabBtn-json" role="tab" aria-selected="false" data-tab="json" type="button">json</button>
+          <button class="tab-btn" id="tabBtn-table" role="tab" aria-selected="false" data-tab="table" type="button">table</button>
+        </div>
+        <div class="panel-body">
+          <div id="panel-text" role="tabpanel" class="text-block"></div>
+          <div id="panel-structured" role="tabpanel" hidden></div>
+          <pre id="panel-json" role="tabpanel" class="code-block" hidden></pre>
+          <div id="panel-table" role="tabpanel" hidden></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Local-only tool. Each run processes one file in memory/temp storage and returns the result — refreshing the page loses it. No accounts, no database, no hosting. See <code>docs/adr/0003-static-html-over-live-server.md</code> for why that stayed out of scope here too.</p>
+  </div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
