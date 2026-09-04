@@ -73,6 +73,18 @@ python eval/run_eval.py
 This needs no API key — it's a deterministic fact-lookup eval, not an LLM
 benchmark. What that distinction means and why: [`docs/eval-methodology.md`](docs/eval-methodology.md).
 
+**Local web app**: the same pipeline, wrapped in a local-only interactive UI
+so you can drag a file in instead of typing a command:
+
+```bash
+uvicorn webapp.main:app --reload
+```
+
+See [`webapp/README.md`](webapp/README.md) for what it does and doesn't add
+(no accounts, no database, no hosting — see
+[`docs/adr/0003-static-html-over-live-server.md`](docs/adr/0003-static-html-over-live-server.md)
+for why that stays out of scope).
+
 **Schema conformance**: proves the "one shared schema" claim is real by
 validating actual output from all three adapters against
 [`docs/schema.json`](docs/schema.json):

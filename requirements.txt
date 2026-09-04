@@ -16,3 +16,10 @@ numpy>=1.26
 
 # Phase 4 — schema conformance test
 jsonschema>=4.20
+
+# Local web app (webapp/) — wraps the existing pipeline for interactive,
+# single-user local use. No new adapter/runtime dependency: FastAPI just
+# calls adapters.router.build_artifact_for, the same function the CLI uses.
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
