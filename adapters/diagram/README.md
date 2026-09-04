@@ -98,28 +98,36 @@ Runs the full pipeline once and returns the common-schema artifact.
    labeled "to." Verified correct on all 3 edges in the test fixture,
    including telling apart a top-down arrow from two diagonal ones.
 
-4. **Labels**: OCR only, via the exact same Tesseract path as the document
-   adapter (`adapters/common/ocr.py`'s `tesseract_status()` — the two
-   adapters share this one probe rather than duplicating it). Shape and
-   topology detection use no OCR at all and are unaffected when Tesseract
-   isn't available.
+4. **Labels**: OCR only, via the exact same EasyOCR path as the document
+   adapter (`adapters/common/ocr.py`'s `ocr_engine_status()`/`read_label()`
+   — the two adapters share this one probe and label-reading helper rather
+   than duplicating them). Shape and topology detection use no OCR at all
+   and are unaffected when the OCR engine isn't available.
 
-   A real finding while building circle/ellipse support: cropping a
-   `node-circle`'s raw bounding box for OCR (the same approach used for
-   rectangles) reliably fed the curved boundary into Tesseract's layout
-   analysis alongside the label text and made it return nothing at all —
-   measured directly on this adapter's own fixture, not a hypothetical
-   (`tests/fixtures/flowchart_with_circle.png`'s "Start"/"End" labels came
-   back empty). A rectangle's flat edge sits clear of its own label at any
-   reasonable padding; an ellipse's boundary curves in close to the label
-   near the top/bottom of the shape. Fixed by insetting the OCR crop
-   further in for `node-circle` specifically (`_ellipse_label_bbox`) before
-   the shared `_ocr_label` path runs — scoped to that one shape so it
-   cannot change OCR behavior for `node`/`node-decision` (confirmed
-   directly: applying the same inset to the existing decision diamond on
-   `flowchart_clean.png` still extracts "Credit check passes?" correctly,
-   but that fix was deliberately *not* generalized to `node-decision` here
-   to keep this change scoped to one limitation — see "Known limitations").
+   A real, now-historical finding from when this adapter used Tesseract:
+   cropping a `node-circle`'s raw bounding box for OCR (the same approach
+   used for rectangles) reliably fed the curved boundary into Tesseract's
+   layout analysis alongside the label text and made it return nothing at
+   all — measured directly on this adapter's own fixture, not a
+   hypothetical (`tests/fixtures/flowchart_with_circle.png`'s "Start"/"End"
+   labels came back empty). A rectangle's flat edge sits clear of its own
+   label at any reasonable padding; an ellipse's boundary curves in close
+   to the label near the top/bottom of the shape. Fixed by insetting the
+   OCR crop further in for `node-circle` specifically (`_ellipse_label_bbox`)
+   before the shared label-reading path runs.
+
+   **Re-verified directly after the EasyOCR switch, and the inset is no
+   longer load-bearing**: EasyOCR reads both `node-circle` labels
+   correctly (`Start`, confidence 1.0; `End`, confidence 0.999) from the
+   *raw*, un-inset bounding box, not just the inset one — its text
+   detector is evidently more robust to the curved boundary than
+   Tesseract's layout analysis was. The inset was left in place anyway
+   (it's harmless — same correct result either way on this fixture — and
+   removing a fix that isn't provably wrong just because the engine
+   changed underneath it is a change worth making deliberately later, not
+   a side effect of an unrelated OCR-engine swap) rather than generalized
+   to `node-decision` (the diamond), which was never affected by this
+   issue under either engine.
 
 ## Confidence — a real finding, not a clean first draft
 
@@ -161,10 +169,12 @@ claim than "this shape connects to that one in this direction."
   expected, correct outcome, not evidence the check is vacuous; it would
   catch a future bug that let a dangling id through.
 - **`ocr-engine-available`** — identical semantics to the document
-  adapter's check of the same name: whether Tesseract was reachable on this
+  adapter's check of the same name: whether EasyOCR was usable on this
   machine, and how many node/edge labels went unlabeled as a result. Shape
   and topology detection are explicitly called out as unaffected, since
-  neither uses OCR.
+  neither uses OCR. Like the document adapter, this passes with
+  `"not checked"` (rather than forcing an EasyOCR model load) for an image
+  with no nodes or edges at all to label.
 
 ## Fixed bug: OpenCV version-dependent `HoughLinesP` output shape
 
@@ -234,14 +244,15 @@ that's a genuinely new incompatibility, not a regression of this fix.
   incorrectly merged down to one node by the same logic. Not tested either
   way; flagging it since the dedup pass is new.
 - Label OCR shares every limitation documented in
-  `adapters/document/README.md`'s "OCR engine — real limitations" section,
-  including this adapter having been built and tested on a machine without
-  a working Tesseract install (same environment-specific fact, not an
-  adapter design limitation). Additionally, a curved node boundary
-  (`node-circle`, and very likely `node-decision`'s diagonal one too,
-  though that wasn't changed here — see "Labels" above) can make Tesseract
-  drop a label's text entirely if the OCR crop isn't inset past the curve;
-  fixed for `node-circle` only in this change.
+  `adapters/document/README.md`'s "OCR engine — EasyOCR" section (CPU
+  inference speed, the one-time model download, the fixed `["en", "hi"]`
+  default language list, no real layout understanding). The curved-node-
+  boundary issue that used to drop a `node-circle` label's text entirely
+  under Tesseract (see "Labels" above) was re-tested directly after the
+  EasyOCR switch and no longer reproduces — EasyOCR reads both round-node
+  labels correctly straight from the raw bounding box — so this is no
+  longer a live limitation, though the defensive inset (`_ellipse_label_bbox`)
+  is still applied for `node-circle`.
 
 ## Test fixtures
 

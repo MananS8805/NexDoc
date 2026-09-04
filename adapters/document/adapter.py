@@ -3,10 +3,10 @@
 Hybrid extraction, per CLAUDE.md Phase 2: a born-digital page (one with a
 real embedded text layer) is read directly — no OCR, no model call, just
 PyMuPDF's own text-layer extraction. A scanned/image-only page has no text
-layer at all, so it goes through OCR (pytesseract / Tesseract) instead.
-Which path a page takes is decided by one real signal — the length of
-`page.get_text()` — never guessed from the file extension or a hardcoded
-per-file assumption.
+layer at all, so it goes through OCR (EasyOCR, via
+`adapters/common/ocr.py`) instead. Which path a page takes is decided by
+one real signal — the length of `page.get_text()` — never guessed from the
+file extension or a hardcoded per-file assumption.
 
 Public entry points, matching adapters/spreadsheet/adapter.py's shape:
     parse_document(path)  -> generator yielding Region objects, one per
@@ -23,10 +23,11 @@ Region classification (per page):
         - a block containing both "description" and "qty"        -> "table-header"
         - anything else                                          -> "field"
     scanned page:
-        - Tesseract available: one region per OCR'd line, grouped by
-          Tesseract's own block/paragraph/line numbering           -> "ocr-line"
-        - Tesseract not available on this machine: one region
-          recording that the page could not be processed           -> "scanned-page-unprocessed"
+        - OCR engine available: one region per visual line of text,
+          grouped from EasyOCR's individual text-box detections by
+          `adapters.common.ocr.group_detections_into_lines`  -> "ocr-line"
+        - OCR engine not available on this machine: one region
+          recording that the page could not be processed      -> "scanned-page-unprocessed"
 
 Confidence:
     - born-digital blocks: a flat 0.98 for every block on that page. The
@@ -36,12 +37,13 @@ Confidence:
       direct, unambiguous read of an already-encoded value). It is not 0.99
       because PDF text-layer reading order can still be ambiguous in ways a
       stored cell value never is.
-    - OCR lines: the mean of Tesseract's own per-word confidence for that
-      line, divided by 100. This is the one place per-region confidence
+    - OCR lines: the mean of EasyOCR's own per-detection confidence for
+      that line (EasyOCR reports confidence in 0-1 already, unlike
+      Tesseract's 0-100 scale). This is the one place per-region confidence
       actually varies within a document, because it is a real signal that
       varies per line — never a hardcoded number.
-    - a page Tesseract could not process at all: 0.0. Zero is not "very
-      unconfident text" here, it is "no text was extracted, at all."
+    - a page the OCR engine could not process at all: 0.0. Zero is not
+      "very unconfident text" here, it is "no text was extracted, at all."
 
 No LLM cleanup pass touches extracted text anywhere in this adapter, per
 CLAUDE.md's guardrail.
@@ -55,12 +57,11 @@ from pathlib import Path
 from typing import Iterator
 
 import fitz  # PyMuPDF
-import pytesseract
+import numpy as np
 from langdetect import LangDetectException, detect
 from PIL import Image
-from pytesseract import Output
 
-from adapters.common.ocr import tesseract_status
+from adapters.common.ocr import group_detections_into_lines, get_reader, ocr_engine_status
 from adapters.common.schema import Artifact, Check, Region, Relationship, Source, sha256_of_file
 
 ADAPTER_NAME = "Document adapter"
@@ -155,23 +156,15 @@ def _extract_born_digital(page, is_first_page_of_document: bool) -> Iterator[Reg
 def _ocr_page(page) -> Iterator[Region]:
     pix = page.get_pixmap(dpi=200)
     image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    data = pytesseract.image_to_data(image, output_type=Output.DICT)
+    image_np = np.array(image)
 
-    lines: dict[tuple[int, int, int], dict] = {}
-    for i in range(len(data["text"])):
-        word = data["text"][i].strip()
-        conf = int(data["conf"][i])
-        if not word or conf < 0:
-            continue
-        key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
-        line = lines.setdefault(key, {"words": [], "confs": []})
-        line["words"].append(word)
-        line["confs"].append(conf)
+    reader = get_reader()
+    detections = reader.readtext(image_np)
+    lines = group_detections_into_lines(detections)
 
-    for idx, key in enumerate(sorted(lines)):
-        line = lines[key]
-        text = " ".join(line["words"])
-        confidence = (sum(line["confs"]) / len(line["confs"])) / 100
+    for idx, line in enumerate(lines):
+        text = " ".join(box[4] for box in line)
+        confidence = sum(box[5] for box in line) / len(line)
         yield Region(
             id=f"page{page.number + 1}!ocr-line{idx + 1}",
             type="ocr-line",
@@ -191,12 +184,21 @@ def _ocr_unavailable_region(page) -> Region:
 
 
 def _iter_regions(doc: fitz.Document) -> Iterator[Region]:
-    tesseract_ok, _ = tesseract_status()
+    # Probed lazily, only once a page actually needs OCR — unlike the old
+    # tesseract_status() (a near-instant binary-version check, cheap enough
+    # to call unconditionally), ocr_engine_status() loads EasyOCR's model
+    # weights into memory on first call, which is real, measurable work
+    # (seconds, not milliseconds). A born-digital-only document should
+    # never pay that cost just because the check exists.
+    ocr_ok: bool | None = None
     for page in doc:
         text_layer = page.get_text().strip()
         if len(text_layer) >= MIN_TEXT_LAYER_CHARS:
             yield from _extract_born_digital(page, is_first_page_of_document=(page.number == 0))
-        elif tesseract_ok:
+            continue
+        if ocr_ok is None:
+            ocr_ok, _ = ocr_engine_status()
+        if ocr_ok:
             yield from _ocr_page(page)
         else:
             yield _ocr_unavailable_region(page)
@@ -260,20 +262,26 @@ def _check_dates_parse(regions: list[Region]) -> Check:
 
 
 def _check_ocr_engine_available(regions: list[Region]) -> Check:
-    ok, detail = tesseract_status()
     scanned_unprocessed = sum(1 for r in regions if r.type == "scanned-page-unprocessed")
+    ocr_lines = sum(1 for r in regions if r.type == "ocr-line")
+    if not scanned_unprocessed and not ocr_lines:
+        # OCR was never invoked while building this document (no scanned
+        # pages at all — see _iter_regions), so this deliberately does not
+        # call ocr_engine_status() here either: that would mean loading
+        # EasyOCR's model weights (real, multi-second work) purely to
+        # answer a question that has no bearing on this document's actual
+        # extraction. Reported as passed/not-applicable, not silently
+        # skipped — a failed validation check is tracked independently of
+        # confidence (CLAUDE.md's guardrail), and "not needed" is a
+        # different, and honest, outcome from "checked and unavailable."
+        return Check("ocr-engine-available", True, "not checked — this document has no scanned pages")
+    ok, detail = ocr_engine_status()
     if ok:
-        return Check("ocr-engine-available", True, f"Tesseract {detail} available")
-    if scanned_unprocessed:
-        return Check(
-            "ocr-engine-available",
-            False,
-            f"Tesseract not available ({detail}) — {scanned_unprocessed} scanned page(s) could not be processed",
-        )
+        return Check("ocr-engine-available", True, detail)
     return Check(
         "ocr-engine-available",
         False,
-        f"Tesseract not available ({detail}) — no effect on this document, it has no scanned pages",
+        f"OCR engine not available ({detail}) — {scanned_unprocessed} scanned page(s) could not be processed",
     )
 
 

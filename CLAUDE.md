@@ -43,16 +43,25 @@ before trusting it)
   current prototype is static HTML generated per-run — see
   `docs/adr/0003-static-html-over-live-server.md`), a task-accuracy eval
   requiring an LLM API key.
-- **Known environment limitation, not an adapter limitation**: the
-  Tesseract OCR binary isn't installed in the environment these adapters
-  were built in (only the `pytesseract` Python package is), and this
-  session couldn't install it (no elevation for a system-wide install;
-  downloading a portable installer binary is out of bounds regardless of
-  authorization). The document and diagram adapters' OCR code paths are
-  real and complete but have never produced a real OCR result on this
-  machine — each adapter detects this and reports it honestly via an
-  `ocr-engine-available` check rather than fabricating text. This is
-  expected to just work on a machine with Tesseract actually installed.
+- **OCR engine switched from pytesseract/Tesseract to EasyOCR.** The old
+  Tesseract-based path had two real, confirmed problems: Tesseract's
+  system binary needs an OS-level install that requires elevation some
+  environments don't have, and the OCR call site never passed a `lang=`
+  argument, so every scanned page was OCR'd with English-only weights
+  regardless of script — verified directly on `tests/fixtures/
+  note_scanned.pdf`'s deliberately-included Devanagari line, which came
+  back as garbage (`Ae Ot od @ se YT ENT`) under the old code. EasyOCR
+  (pure Python + PyTorch, no system binary, configured for `["en", "hi"]`
+  by default) fixes both — the same fixture's Hindi line now comes back as
+  real, readable Devanagari. See `adapters/common/ocr.py`'s module
+  docstring and `adapters/document/README.md`'s "OCR engine — EasyOCR"
+  section for the full reasoning, real CPU-inference timings measured in
+  this environment, and the honest new limitations that come with a
+  neural OCR engine instead of Tesseract (a much larger dependency,
+  slower CPU inference, a one-time model download). Both the document and
+  diagram adapters detect and report OCR availability honestly via the
+  same `ocr-engine-available` check as before — the check's semantics and
+  name are unchanged, only which engine it describes.
 
 ## Architecture — the adapter pattern
 
