@@ -127,6 +127,37 @@ claim than "this shape connects to that one in this direction."
   and topology detection are explicitly called out as unaffected, since
   neither uses OCR.
 
+## Fixed bug: OpenCV version-dependent `HoughLinesP` output shape
+
+`_detect_edges` used to assume `cv2.HoughLinesP` always returns lines shaped
+`(N, 1, 4)` (the historical OpenCV behavior — each line a `[1, 4]`
+sub-array, so `line[0]` is the 4-tuple `(x1, y1, x2, y2)`). OpenCV 5.0.0
+(what `pip install opencv-python` gives you as of this writing, with no
+upper bound in `requirements.txt`) returns `(N, 4)` instead — `line` itself
+*is* the 4-length array, so `line[0]` is a bare `numpy.int32` scalar and
+`tuple(line[0])` raised `TypeError: 'numpy.int32' object is not iterable`.
+This was a real, reproducing crash on the repo's own bundled fixture
+(`tests/fixtures/flowchart_clean.png`), not a hypothetical — a plain
+`pip install -r requirements.txt` today gets it out of the box, failing 3
+of 4 `tests/test_schema_conformance.py` cases.
+
+Fixed by flattening each line with `np.asarray(line).reshape(-1)` instead
+of indexing `line[0]` — this yields the same 4 ints regardless of whether
+OpenCV wraps them in an extra singleton dimension or not, so it isn't tied
+to either version's shape. `_edge_angles_deg` (used by node/contour
+detection) made the same `(N, 1, 2)` assumption about `approxPolyDP`
+output; that shape is still what OpenCV 5.0.0 returns as of this fix, but
+it was hardened with the same `reshape(-1, 2)` pattern defensively, so a
+future OpenCV release flattening that output too won't silently
+reintroduce this class of bug. `requirements.txt`'s `opencv-python>=4.9`
+was deliberately left with no upper bound — see the commit that introduced
+this fix for the reasoning (the parsing is shape-agnostic now, not tied to
+a version range).
+
+If you hit this exact `TypeError` again on some future OpenCV release, it
+means a line's *encoding* changed (not just an extra wrapping dimension) —
+that's a genuinely new incompatibility, not a regression of this fix.
+
 ## Known limitations (Phase 3 scope, not bugs)
 
 - Only rectangle and diamond node shapes are recognized; any other shape
