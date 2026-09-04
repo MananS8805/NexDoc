@@ -49,11 +49,27 @@
         <h2 id="resultTitle"></h2>
         <p class="result-meta" id="resultMeta"></p>
       </div>
-      <span class="badge adapter-badge" id="resultAdapter"></span>
+      <div class="result-head-right">
+        <span class="badge adapter-badge" id="resultAdapter"></span>
+        <div class="download-menu" id="downloadMenu">
+          <button type="button" class="download-btn" id="downloadToggle" aria-haspopup="true" aria-expanded="false">Download ▾</button>
+          <div class="download-list" id="downloadList" hidden>
+            <button type="button" data-format="schema">schema.json</button>
+            <button type="button" data-format="text">text.txt</button>
+            <button type="button" data-format="structured">structured.json</button>
+            <button type="button" data-format="table">table.json</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="confidence-strip" id="confidenceStrip"></div>
     <div class="checks-strip" id="checksStrip"></div>
+
+    <div class="recon-section">
+      <h3>Reconstruction <span class="recon-sub">— what the pipeline understood this file to be</span></h3>
+      <div class="recon-view" id="reconView"></div>
+    </div>
 
     <div class="ask-box" id="askBox">
       <h3>Ask a question</h3>
@@ -67,7 +83,7 @@
 
     <div class="demo">
       <div class="preview-col">
-        <h3>Input preview</h3>
+        <h3>Input preview <span class="recon-sub">— region boxes by type/confidence, not a visual reconstruction</span></h3>
         <div class="page-frame" id="pageFrame">
           <div class="scanline" id="scanline"></div>
           <div class="empty-state" id="noPreview" hidden>No positional preview available for this file — see the <strong>structured</strong> tab for the full region list.</div>
