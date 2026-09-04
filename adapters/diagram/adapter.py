@@ -89,11 +89,16 @@ def _load_binary(path: str | Path) -> np.ndarray:
 
 
 def _edge_angles_deg(pts: np.ndarray) -> list[float]:
+    # approxPolyDP has historically returned points shaped (N, 1, 2); reshape
+    # defensively to (N, 2) so this doesn't silently break the way the
+    # HoughLinesP parsing below did if a future OpenCV version flattens this
+    # output too. Confirmed unchanged (still (N, 1, 2)) on OpenCV 5.0.0.
+    pts = np.asarray(pts).reshape(-1, 2)
     angles = []
     n = len(pts)
     for i in range(n):
-        x0, y0 = pts[i][0]
-        x1, y1 = pts[(i + 1) % n][0]
+        x0, y0 = pts[i]
+        x1, y1 = pts[(i + 1) % n]
         angles.append(abs(math.degrees(math.atan2(y1 - y0, x1 - x0))) % 180)
     return angles
 
@@ -187,9 +192,16 @@ def _detect_edges(binary_full: np.ndarray, binary_masked: np.ndarray, nodes: lis
     if lines is None:
         return []
 
+    # cv2.HoughLinesP's return shape is not consistent across OpenCV
+    # versions: historically (N, 1, 4) (each line a [1,4] sub-array), but
+    # OpenCV 5.0.0 returns (N, 4) directly. np.asarray(...).reshape(-1)
+    # flattens either shape to the same 4 ints, so this works regardless of
+    # which shape the installed OpenCV version produces — no version
+    # sniffing required.
+    #
     # Cluster collinear/overlapping segments that Hough tends to split into
     # near-duplicates, keeping the longest representative of each cluster.
-    segments = [tuple(l[0]) for l in lines]
+    segments = [tuple(int(v) for v in np.asarray(l).reshape(-1)) for l in lines]
     segments.sort(key=lambda s: -math.hypot(s[2] - s[0], s[3] - s[1]))
     kept: list[tuple[int, int, int, int]] = []
     for seg in segments:
