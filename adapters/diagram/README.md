@@ -59,6 +59,28 @@ Runs the full pipeline once and returns the common-schema artifact.
    neither clean pattern is still emitted, honestly, at confidence 0.60,
    rather than forced into one bucket.
 
+   A contour that *doesn't* approximate to 4 vertices is now checked for
+   circle/ellipse before being given up on: a true ellipse's contour-area-
+   to-bounding-box-area ratio is `pi/4` (~0.785) regardless of aspect ratio
+   (area = `pi*a*b`, bbox area = `4*a*b`) — one constant that catches both a
+   perfect circle and a stretched ellipse, unlike the rectangle/diamond
+   bands above. That ratio is only a cheap pre-filter, though (a rounded-
+   corner rectangle could land in the same band by coincidence): a contour
+   passing it gets a real `cv2.fitEllipse` fit, and the *actual* confidence
+   signal is how tightly the real contour points hug that fitted ellipse's
+   boundary (mean normalized radial error) — → `node-circle` (confidence
+   0.75–0.95, higher for a tighter fit), or discarded if the fit is poor.
+   One more real-world wrinkle specific to round/ring shapes: a drawn
+   outline is a thin ring, and `cv2.findContours` returns both the ring's
+   outer edge and its inner edge as separate closed contours — both can
+   independently pass the ellipse checks above and register the same
+   physical shape twice at nearly the same bounding box. (This never
+   surfaced for rectangles/diamonds on the original fixture — there, only
+   one of the two per-shape contours ever survived the 4-vertex test, so it
+   was a latent gap the circle path exposes, not one it introduces.) A
+   dedup pass keeps only the larger of any two heavily-overlapping node
+   candidates.
+
 2. **Edges**: node bounding boxes (padded) are masked out of the binary
    image first, so `cv2.HoughLinesP` only ever sees connector strokes, not
    a node's own straight border — otherwise every rectangle edge would get
@@ -81,6 +103,23 @@ Runs the full pipeline once and returns the common-schema artifact.
    adapters share this one probe rather than duplicating it). Shape and
    topology detection use no OCR at all and are unaffected when Tesseract
    isn't available.
+
+   A real finding while building circle/ellipse support: cropping a
+   `node-circle`'s raw bounding box for OCR (the same approach used for
+   rectangles) reliably fed the curved boundary into Tesseract's layout
+   analysis alongside the label text and made it return nothing at all —
+   measured directly on this adapter's own fixture, not a hypothetical
+   (`tests/fixtures/flowchart_with_circle.png`'s "Start"/"End" labels came
+   back empty). A rectangle's flat edge sits clear of its own label at any
+   reasonable padding; an ellipse's boundary curves in close to the label
+   near the top/bottom of the shape. Fixed by insetting the OCR crop
+   further in for `node-circle` specifically (`_ellipse_label_bbox`) before
+   the shared `_ocr_label` path runs — scoped to that one shape so it
+   cannot change OCR behavior for `node`/`node-decision` (confirmed
+   directly: applying the same inset to the existing decision diamond on
+   `flowchart_clean.png` still extracts "Credit check passes?" correctly,
+   but that fix was deliberately *not* generalized to `node-decision` here
+   to keep this change scoped to one limitation — see "Known limitations").
 
 ## Confidence — a real finding, not a clean first draft
 
@@ -160,28 +199,68 @@ that's a genuinely new incompatibility, not a regression of this fix.
 
 ## Known limitations (Phase 3 scope, not bugs)
 
-- Only rectangle and diamond node shapes are recognized; any other shape
-  (circle, parallelogram) would currently fall through to the "4 vertices
-  but neither clean pattern" bucket at best, or be missed entirely if it
-  doesn't approximate to 4 vertices.
+- Rectangle, diamond, and now circle/ellipse node shapes are recognized
+  (see "How detection actually works" above for the ellipse-fit approach
+  and its confidence signal, added and proven against
+  `tests/fixtures/flowchart_with_circle.png`). Any *other* shape
+  (parallelogram, rounded rectangle, hexagon, ...) still falls through to
+  the "4 vertices but neither clean pattern" bucket at best, or is missed
+  entirely if it doesn't approximate to 4 vertices and doesn't pass the
+  ellipse fit either. Only tested against clean, computer-generated
+  ellipses/circles at roughly the size and stroke width of the two test
+  fixtures — an untested edge case worth calling out explicitly: a very
+  small or very thin (near-degenerate, almost line-like) ellipse would
+  likely have too few usable contour points, or too poor a fit relative to
+  its size, to clear `ELLIPSE_MIN_CONTOUR_POINTS`/`ELLIPSE_FIT_ERROR_MAX` —
+  this hasn't been measured, so it's flagged here rather than assumed to
+  work.
 - Curved or bent (non-straight) connectors are not detected — `HoughLinesP`
   finds straight segments only.
 - Direction inference (arrowhead-density heuristic) is measurably weaker
   when a connector terminates at a diamond's vertex vs. a rectangle's flat
   edge — see the confidence table above. This is reported via confidence,
-  not hidden.
+  not hidden. Untested against a connector terminating at a `node-circle`
+  specifically (the new fixture's arrows all still land on a flat or
+  near-flat approach angle) — likely closer to the diamond case than the
+  rectangle case, since a circle's boundary is curved everywhere, but this
+  is a guess, not a measurement, and is called out as such rather than
+  quietly assumed.
 - No handling for overlapping or touching shapes, curved layouts, multiple
-  diagrams per image, or diagrams with a background pattern/texture.
+  diagrams per image, or diagrams with a background pattern/texture. The
+  inner/outer-contour duplicate-detection issue solved for `node-circle`
+  (see above) is a related but distinct problem from *overlapping distinct
+  shapes* — the dedup pass keys on bounding-box overlap, so two genuinely
+  separate but touching/overlapping shapes would likely also get
+  incorrectly merged down to one node by the same logic. Not tested either
+  way; flagging it since the dedup pass is new.
 - Label OCR shares every limitation documented in
   `adapters/document/README.md`'s "OCR engine — real limitations" section,
   including this adapter having been built and tested on a machine without
   a working Tesseract install (same environment-specific fact, not an
-  adapter design limitation).
+  adapter design limitation). Additionally, a curved node boundary
+  (`node-circle`, and very likely `node-decision`'s diagonal one too,
+  though that wasn't changed here — see "Labels" above) can make Tesseract
+  drop a label's text entirely if the OCR crop isn't inset past the curve;
+  fixed for `node-circle` only in this change.
 
-## Test fixture
+## Test fixtures
 
 `tests/fixtures/generate_diagram_fixture.py` builds
 `tests/fixtures/flowchart_clean.png`: a vendor-onboarding flow matching the
 UI mock's original sample — one start node (rectangle), one decision node
 (diamond), two action nodes (rectangles), three arrows ("yes"/"no" branches
-plus the initial edge), drawn cleanly with Pillow at high contrast.
+plus the initial edge), drawn cleanly with Pillow at high contrast. (Note:
+this script hardcodes a Windows font path, `C:/Windows/Fonts/arial.ttf`, and
+does not run as-is on this repo's Linux dev environment — `flowchart_clean.png`
+itself is still checked in and works fine, this only affects regenerating it.)
+
+`tests/fixtures/generate_diagram_fixture_shapes.py` builds
+`tests/fixtures/flowchart_with_circle.png` specifically to exercise
+circle/ellipse node detection: an ellipse start node ("Start", non-1:1
+aspect ratio), a diamond decision node ("Valid?"), a rectangle action node
+("Approve"), and a circle end node ("End", 1:1 aspect ratio) — deliberately
+including both a stretched ellipse and a true circle so the same code path
+is proven on both, plus the pre-existing rectangle/diamond shapes so the
+new detection doesn't accidentally displace them. Looks up a real installed
+TTF (DejaVu Sans) with a fallback to Pillow's bitmap font, so it runs on
+this Linux environment unlike the sibling script above.

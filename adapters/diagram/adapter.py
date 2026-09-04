@@ -79,6 +79,33 @@ HOUGH_MAX_LINE_GAP = 8
 ENDPOINT_TO_NODE_MAX_DIST = 45  # px — how far an edge endpoint can be from a node and still count as touching it
 ARROWHEAD_PROBE_RADIUS = 14  # px, neighborhood used to detect which endpoint has the arrowhead
 
+# Circle/ellipse nodes: a true ellipse's contour-area-to-bounding-box-area
+# ratio is pi/4 (~0.7854) regardless of aspect ratio (area = pi*a*b, bbox
+# area = (2a)(2b) = 4ab) — unlike the rectangle/diamond bands, this one
+# constant works whether the shape is a perfect circle or a stretched
+# ellipse. It's a pre-filter, not proof: a rounded-corner rectangle could
+# land in the same band by coincidence, so cv2.fitEllipse + a real fit-error
+# measurement (below) is what actually confirms it.
+ELLIPSE_FILL_RATIO_MIN = 0.70
+ELLIPSE_FILL_RATIO_MAX = 0.86
+ELLIPSE_MIN_CONTOUR_POINTS = 8  # cv2.fitEllipse requires >=5; a few more avoids fitting noise
+ELLIPSE_FIT_ERROR_TIGHT = 0.03  # mean normalized radial error at/below this -> top confidence band
+ELLIPSE_FIT_ERROR_MAX = 0.12  # mean normalized radial error above this -> not a real ellipse, discarded
+NODE_DEDUP_IOU_THRESHOLD = 0.5  # bbox overlap above this -> same physical shape, keep only the larger candidate
+# How far in from a node-circle's bbox to crop before OCR. A rectangle's
+# flat edge sits well clear of its own label at any padding, but an
+# ellipse/circle's boundary curves in close to the bbox near the label —
+# cropping the raw bbox reliably fed the curved border into Tesseract's
+# layout analysis alongside the label text and it dropped the text entirely
+# (measured directly on this adapter's own circle/ellipse fixture: bbox-crop
+# OCR returned nothing for "Start"/"Valid?"/"End" even though the text
+# renders cleanly; insetting past the curve fixed it). Scoped to node-circle
+# only — confirmed by direct test that the existing node-decision (diamond)
+# OCR path on flowchart_clean.png is a separate, already-working case this
+# change does not touch.
+ELLIPSE_LABEL_INSET_X_FRAC = 0.22
+ELLIPSE_LABEL_INSET_Y_FRAC = 0.30
+
 
 def _load_binary(path: str | Path) -> np.ndarray:
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
@@ -110,6 +137,82 @@ def _is_axis_aligned(angles: list[float]) -> bool:
     return all(near(a, 0) or near(a, 90) for a in angles)
 
 
+def _ellipse_fit_error(contour: np.ndarray, ellipse: tuple) -> float:
+    """Mean normalized radial error between a contour's real points and the
+    ellipse cv2.fitEllipse fit to them. 0.0 means every point sits exactly
+    on the fitted ellipse boundary; larger values mean the contour is
+    something else that merely happened to pass the fill-ratio pre-filter
+    (e.g. a rounded rectangle). This is the actual confidence signal for
+    node-circle, not the fill-ratio band membership, which is only a cheap
+    pre-filter to avoid running fitEllipse on obviously-non-round contours.
+    """
+    (cx, cy), (major, minor), angle_deg = ellipse
+    a, b = major / 2, minor / 2
+    if a <= 0 or b <= 0:
+        return float("inf")
+    theta = math.radians(angle_deg)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
+    pts = np.asarray(contour).reshape(-1, 2)
+    errors = []
+    for px, py in pts:
+        dx, dy = px - cx, py - cy
+        # Rotate into the ellipse's own axis frame, then scale by its two
+        # radii — a point exactly on the boundary has radius exactly 1 in
+        # this frame regardless of the ellipse's aspect ratio or rotation.
+        xr = dx * cos_t + dy * sin_t
+        yr = -dx * sin_t + dy * cos_t
+        r = math.hypot(xr / a, yr / b)
+        errors.append(abs(r - 1.0))
+    return sum(errors) / len(errors) if errors else float("inf")
+
+
+def _ellipse_confidence(mean_fit_error: float) -> float:
+    if mean_fit_error <= ELLIPSE_FIT_ERROR_TIGHT:
+        return 0.95
+    # Linear falloff from the tight-fit ceiling down to a floor as the fit
+    # gets progressively worse, capped by ELLIPSE_FIT_ERROR_MAX (contours
+    # past that point are rejected before this is ever called).
+    span = ELLIPSE_FIT_ERROR_MAX - ELLIPSE_FIT_ERROR_TIGHT
+    frac = (mean_fit_error - ELLIPSE_FIT_ERROR_TIGHT) / span if span > 0 else 1.0
+    return round(0.95 - 0.20 * frac, 4)
+
+
+def _bbox_iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return 0.0
+    inter = (ix1 - ix0) * (iy1 - iy0)
+    area_a = (ax1 - ax0) * (ay1 - ay0)
+    area_b = (bx1 - bx0) * (by1 - by0)
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _dedup_nodes(nodes: list[dict]) -> list[dict]:
+    """A drawn shape's outline is a thin ring; cv2.findContours (RETR_LIST)
+    returns the ring's outer edge and its inner edge as two separate closed
+    contours, and both can independently pass shape checks — registering
+    the same physical shape twice at nearly the same bbox. Observed and
+    real on the circle/ellipse fixture (the outer and inner boundary of a
+    drawn circle's stroke are both very close to the pi/4 fill-ratio band
+    and both fit an ellipse cleanly). This never fired on the existing
+    rectangle/diamond fixture — there, only one of the two contours per
+    shape ever survived approxPolyDP's 4-vertex test, so this is a real gap
+    the circle path surfaces, not a change to prior behavior. Keep the
+    larger (outer, visually more accurate) of any two heavily-overlapping
+    candidates.
+    """
+    kept: list[dict] = []
+    for cand in sorted(nodes, key=lambda n: -n["area"]):
+        if any(_bbox_iou(cand["bbox"], k["bbox"]) > NODE_DEDUP_IOU_THRESHOLD for k in kept):
+            continue
+        kept.append(cand)
+    return kept
+
+
 def _detect_nodes(binary: np.ndarray) -> list[dict]:
     contours, hierarchy = cv2.findContours(binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     nodes = []
@@ -119,29 +222,49 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
             continue
         perimeter = cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-        if len(approx) != 4:
-            continue
-        x, y, w, h = cv2.boundingRect(approx)
+        x, y, w, h = cv2.boundingRect(contour)
         bbox_area = w * h
         fill_ratio = area / bbox_area if bbox_area else 0
-        angles = _edge_angles_deg(approx)
-        axis_aligned = _is_axis_aligned(angles)
-        # A rectangle's contour area should nearly fill its bounding box; a
-        # diamond's fills roughly half of it (its bbox corners are outside
-        # the shape). Both are real, distinct, measurable signals.
-        if axis_aligned and fill_ratio > 0.85:
-            shape = "node"
-            confidence = 0.97 if fill_ratio > 0.93 else 0.90
-        elif not axis_aligned and 0.35 < fill_ratio < 0.65:
-            shape = "node-decision"
-            confidence = 0.93 if 0.45 < fill_ratio < 0.55 else 0.85
-        else:
-            # 4 vertices but neither clean rectangle nor clean diamond —
-            # still worth surfacing, honestly flagged as uncertain rather
-            # than forced into one bucket.
-            shape = "node"
-            confidence = 0.6
-        nodes.append({"bbox": (x, y, x + w, y + h), "shape": shape, "confidence": confidence, "area": area})
+
+        if len(approx) == 4:
+            angles = _edge_angles_deg(approx)
+            axis_aligned = _is_axis_aligned(angles)
+            # A rectangle's contour area should nearly fill its bounding box; a
+            # diamond's fills roughly half of it (its bbox corners are outside
+            # the shape). Both are real, distinct, measurable signals.
+            if axis_aligned and fill_ratio > 0.85:
+                shape = "node"
+                confidence = 0.97 if fill_ratio > 0.93 else 0.90
+            elif not axis_aligned and 0.35 < fill_ratio < 0.65:
+                shape = "node-decision"
+                confidence = 0.93 if 0.45 < fill_ratio < 0.55 else 0.85
+            else:
+                # 4 vertices but neither clean rectangle nor clean diamond —
+                # still worth surfacing, honestly flagged as uncertain rather
+                # than forced into one bucket.
+                shape = "node"
+                confidence = 0.6
+            nodes.append({"bbox": (x, y, x + w, y + h), "shape": shape, "confidence": confidence, "area": area})
+            continue
+
+        # Not a clean 4-vertex polygon — before giving up (the prior
+        # behavior for every non-quadrilateral contour), check whether it's
+        # a circle/ellipse. Gated on both the fill-ratio pre-filter and a
+        # minimum point count so fitEllipse isn't run on tiny/degenerate
+        # contours.
+        if len(contour) >= ELLIPSE_MIN_CONTOUR_POINTS and ELLIPSE_FILL_RATIO_MIN <= fill_ratio <= ELLIPSE_FILL_RATIO_MAX:
+            ellipse = cv2.fitEllipse(contour)
+            fit_error = _ellipse_fit_error(contour, ellipse)
+            if fit_error <= ELLIPSE_FIT_ERROR_MAX:
+                confidence = _ellipse_confidence(fit_error)
+                nodes.append(
+                    {"bbox": (x, y, x + w, y + h), "shape": "node-circle", "confidence": confidence, "area": area}
+                )
+        # else: neither rectangle, diamond, nor circle/ellipse — honestly
+        # missed, same as any other unrecognized shape (see README's "Known
+        # limitations").
+
+    nodes = _dedup_nodes(nodes)
     # Reading order: top-to-bottom, then left-to-right.
     nodes.sort(key=lambda n: (n["bbox"][1], n["bbox"][0]))
     return nodes
@@ -282,6 +405,13 @@ def _ocr_label(image_bgr: np.ndarray, bbox: tuple[int, int, int, int], padding: 
     return " ".join(words), round((sum(confs) / len(confs)) / 100, 4)
 
 
+def _ellipse_label_bbox(bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    x0, y0, x1, y1 = bbox
+    w, h = x1 - x0, y1 - y0
+    inset_x, inset_y = int(w * ELLIPSE_LABEL_INSET_X_FRAC), int(h * ELLIPSE_LABEL_INSET_Y_FRAC)
+    return (x0 + inset_x, y0 + inset_y, x1 - inset_x, y1 - inset_y)
+
+
 def _iter_regions(path: str | Path) -> Iterator[Region]:
     binary = _load_binary(path)
     image_bgr = cv2.imread(str(path))
@@ -296,7 +426,8 @@ def _iter_regions(path: str | Path) -> Iterator[Region]:
         node_ids.append(region_id)
         text, ocr_conf = (None, 0.0)
         if tesseract_ok:
-            text, ocr_conf = _ocr_label(image_bgr, node["bbox"])
+            ocr_bbox = _ellipse_label_bbox(node["bbox"]) if node["shape"] == "node-circle" else node["bbox"]
+            text, ocr_conf = _ocr_label(image_bgr, ocr_bbox)
         yield Region(
             id=region_id,
             type="node",
