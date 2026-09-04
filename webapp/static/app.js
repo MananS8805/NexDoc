@@ -78,6 +78,76 @@ function renderResult(){
   renderChecks();
   renderPreview(true);
   renderActiveTab();
+  resetAskAnswer();
+}
+
+/* ---------- Ask a question (real Groq-backed task-accuracy Q&A) ----------
+ * Reuses qa/groq_qa.py via POST /api/ask — no Groq-calling logic here, this
+ * is just the form/fetch/render plumbing. GET /api/ask/status is checked
+ * once on load so the box shows an honest disabled state (never a request
+ * that's silently doomed to fail) when GROQ_API_KEY isn't configured.
+ */
+let askAvailable = false;
+
+async function initAsk(){
+  const sub = document.getElementById('askSub');
+  const input = document.getElementById('askInput');
+  const submit = document.getElementById('askSubmit');
+  try{
+    const resp = await fetch('/api/ask/status');
+    const body = await resp.json();
+    askAvailable = !!body.available;
+    sub.textContent = body.detail;
+  }catch(err){
+    askAvailable = false;
+    sub.textContent = 'Could not reach the local server to check Groq configuration: ' + err.message;
+  }
+  input.disabled = !askAvailable;
+  submit.disabled = !askAvailable;
+  if(askAvailable){
+    sub.textContent = 'Ask a real question about the artifact above — answered by Groq from its structured representation.';
+  }
+
+  document.getElementById('askForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if(!askAvailable || !doc) return;
+    const question = input.value.trim();
+    if(!question) return;
+
+    const answerBox = document.getElementById('askAnswer');
+    answerBox.hidden = false;
+    answerBox.className = 'ask-answer pending';
+    answerBox.textContent = 'Asking Groq…';
+    submit.disabled = true;
+
+    try{
+      const resp = await fetch('/api/ask', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({question, artifact: doc.realArtifact}),
+      });
+      const body = await resp.json();
+      if(!resp.ok || !body.ok){
+        answerBox.className = 'ask-answer error';
+        answerBox.textContent = body.error || ('Request failed with status ' + resp.status);
+      } else {
+        answerBox.className = 'ask-answer';
+        answerBox.textContent = body.answer;
+      }
+    }catch(err){
+      answerBox.className = 'ask-answer error';
+      answerBox.textContent = 'Could not reach the local server: ' + err.message;
+    } finally {
+      submit.disabled = !askAvailable;
+    }
+  });
+}
+
+function resetAskAnswer(){
+  const answerBox = document.getElementById('askAnswer');
+  answerBox.hidden = true;
+  answerBox.textContent = '';
+  document.getElementById('askInput').value = '';
 }
 
 function renderConfidenceStrip(){
@@ -257,3 +327,4 @@ function initUpload(){
 
 initTabs();
 initUpload();
+initAsk();

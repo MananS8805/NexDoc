@@ -55,6 +55,16 @@
     <div class="confidence-strip" id="confidenceStrip"></div>
     <div class="checks-strip" id="checksStrip"></div>
 
+    <div class="ask-box" id="askBox">
+      <h3>Ask a question</h3>
+      <p class="ask-sub" id="askSub">Checking whether Groq Q&amp;A is configured…</p>
+      <form id="askForm" class="ask-form">
+        <input type="text" id="askInput" placeholder="e.g. how much do I spend on Housing?" autocomplete="off" disabled>
+        <button type="submit" id="askSubmit" disabled>Ask</button>
+      </form>
+      <div class="ask-answer" id="askAnswer" hidden></div>
+    </div>
+
     <div class="demo">
       <div class="preview-col">
         <h3>Input preview</h3>

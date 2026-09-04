@@ -29,20 +29,31 @@ before trusting it)
   (`adapters/router.py`) and CLI (`run_adapter.py`) route any of the three
   file types to the correct adapter automatically. See `README.md` for the
   full picture and quickstart.
-- **One real eval exists, and only one.** `eval/run_eval.py` is a
-  deterministic fact-lookup eval (no LLM call, no API key) for the
-  spreadsheet adapter only: baseline 0/6, structured 6/6 on
-  `tests/fixtures/budget_test.xlsx`. This is a real, measured, but
-  deliberately narrower claim than LLM task-accuracy — see
-  `docs/eval-methodology.md` for exactly what it does and doesn't show.
-  Documents and diagrams have no eval harness yet; the UI's comparison bars
-  for those two stay labeled illustrative until one exists. Never present a
-  fabricated or estimated number as measured.
+- **Two real evals exist for the spreadsheet adapter now.**
+  `eval/run_eval.py` is a deterministic fact-lookup eval (no LLM call, no
+  API key): baseline 0/6, structured 6/6 on
+  `tests/fixtures/budget_test.xlsx`. `eval/run_real_eval.py` is the
+  real, model-backed task-accuracy eval — it calls a real Groq-hosted LLM
+  (`qa/groq_qa.py`) with the baseline and structured representations and
+  scores its free-text answers against the same `qa_dataset.json`. It
+  requires `GROQ_API_KEY` (see `.env.example`) and is opt-in (a separate
+  script; `run_eval.py` stays the fast/free/keyless default). Its code path
+  is built and covered by mocked unit tests
+  (`tests/test_groq_qa.py`, `tests/test_run_real_eval.py`), but no session
+  building this had a real key, so no live-model result has ever been
+  produced or recorded here — see `docs/eval-methodology.md`'s "Honesty
+  about verification." Documents and diagrams have no eval harness yet
+  (deterministic or real); the UI's comparison bars for those two stay
+  labeled illustrative until one exists. Never present a fabricated or
+  estimated number as measured.
+- The web app (`webapp/`) has a real "Ask a question" box wired to
+  `qa/groq_qa.py` via `POST /api/ask` — same honest-when-unconfigured
+  pattern as the eval script (`GET /api/ask/status` reports whether
+  `GROQ_API_KEY` is set before the box is even usable).
 - **Not built, and out of scope for now**: auth/roles/reviewer workflow
-  (Phase 5), a live server or API (Phase 4's UI wiring describes one; the
-  current prototype is static HTML generated per-run — see
-  `docs/adr/0003-static-html-over-live-server.md`), a task-accuracy eval
-  requiring an LLM API key.
+  (Phase 5), a live server or full API beyond the local `webapp/` (Phase
+  4's UI wiring describes one; the CLI's own output stays static HTML per
+  run — see `docs/adr/0003-static-html-over-live-server.md`).
 - **OCR engine switched from pytesseract/Tesseract to EasyOCR.** The old
   Tesseract-based path had two real, confirmed problems: Tesseract's
   system binary needs an OS-level install that requires elevation some

@@ -2,11 +2,21 @@
 
 ## What exists today
 
-One real, measured eval: [`eval/run_eval.py`](../eval/run_eval.py),
-scoring the spreadsheet adapter's structured output against a naive
-flatten-to-CSV baseline on `tests/fixtures/budget_test.xlsx`. Result:
-baseline 0/6, structured 6/6. Documented with its full caveats in
-[`adapters/spreadsheet/README.md`](../adapters/spreadsheet/README.md#eval).
+Two real evals now exist for the spreadsheet adapter:
+
+- [`eval/run_eval.py`](../eval/run_eval.py) — the deterministic
+  fact-lookup eval, scoring the spreadsheet adapter's structured output
+  against a naive flatten-to-CSV baseline on
+  `tests/fixtures/budget_test.xlsx`. Result: baseline 0/6, structured 6/6.
+  Documented with its full caveats in
+  [`adapters/spreadsheet/README.md`](../adapters/spreadsheet/README.md#eval).
+  No API key, no model call, runs in under a second — this stays the
+  default eval.
+- [`eval/run_real_eval.py`](../eval/run_real_eval.py) — the real
+  task-accuracy eval described below, added to close the gap this document
+  used to describe as unbuilt. It requires a `GROQ_API_KEY` and is opt-in
+  (a separate script, not a flag that changes `run_eval.py`'s default
+  behavior).
 
 Documents and diagrams have **no eval harness at all yet**. The UI
 prototype's comparison bars for those two kinds are illustrative targets
@@ -30,13 +40,18 @@ and it matters which one you're looking at:
    actually answer the question correctly? This requires a real model call,
    scoring free-text answers, and dealing with everything that comes with
    that (prompt sensitivity, partial credit, the model's own reasoning
-   failures independent of the data). **This has not been built.** An
-   earlier version of `run_eval.py` was written to do this via the
-   Anthropic API, but no API key was available in the environment this was
-   built in, and CLAUDE.md's guardrail is explicit: never present an
+   failures independent of the data). **This is now built**, in
+   [`eval/run_real_eval.py`](../eval/run_real_eval.py) and
+   [`qa/groq_qa.py`](../qa/groq_qa.py) — see "The real task-accuracy eval"
+   below. An earlier version of `run_eval.py` was written to do this via
+   the Anthropic API, but no API key was available in the environment this
+   was built in, and CLAUDE.md's guardrail is explicit: never present an
    estimated number as measured. Rather than leave the eval blocked on a
    credential, it was rewritten to measure (1) instead — a real, weaker,
-   but honestly-labeled claim.
+   but honestly-labeled claim. Distinction (1) still stands on its own and
+   `run_eval.py` still exists and still runs by default: (2) doesn't
+   replace it, it answers the different, stronger question (1) was never
+   trying to answer.
 
 **Read every number produced by this repo's eval against distinction (1),
 not (2).** "Structured scores 100%, baseline scores 0%" means "every fact
@@ -62,19 +77,56 @@ with more literal (non-formula) data would show the baseline scoring above
 by opening the same file with `data_only=True` vs `False` and comparing —
 not assumed.
 
-## How to extend this to a real task-accuracy eval later
+## The real task-accuracy eval (`eval/run_real_eval.py`)
 
-`eval/qa_dataset.json`'s `check` field (`cell_value`, `cross_sheet_ref`,
-`unresolved_reason`) already names what each question is testing
-structurally. A task-accuracy eval could reuse this same dataset shape:
-for each question, call an LLM with (a) the baseline text and (b) the
-structured JSON as context, ask the question, and score the free-text
-answer against `expect_substring` — closer to what CLAUDE.md's Phase 1
-originally specified. That requires an API key this environment doesn't
-have; the moment one is available, `eval/run_eval.py`'s `_ask`-style
-pattern (present in an earlier draft of this file, removed rather than
-left half-working) is the natural place to add it back, likely gated
-behind a flag so the fast, free, deterministic eval stays the default.
+This closes the gap the previous section of this document used to
+describe as unbuilt. It reuses `eval/qa_dataset.json` exactly as the old
+"How to extend this later" section proposed — the `check` field
+(`cell_value`, `cross_sheet_ref`, `unresolved_reason`) already named what
+each question tests structurally, so no new dataset was needed.
+
+**What it measures.** For each question in `qa_dataset.json`, a real Groq-
+hosted LLM (via [`qa/groq_qa.py`](../qa/groq_qa.py)) is asked the question
+twice: once given the flattened CSV baseline as context, once given the
+spreadsheet's structured common-schema JSON (`to_structured()`'s region
+list — see `qa/groq_qa.py`'s module docstring for why that representation
+specifically, not `to_text()` or the full `to_json()`). Each free-text
+answer is scored against `expect_substring` with the same case-insensitive
+substring match `run_eval.py` already uses. This is genuinely distinction
+(2) from the section above: a model actually reasoning over the
+representation, not a direct code lookup.
+
+**Requirements.** A real `GROQ_API_KEY` (see
+[`.env.example`](../.env.example) at the repo root — copy it to `.env` and
+fill in a key from https://console.groq.com/keys). Without one,
+`run_real_eval.py` prints a clear "SKIPPED" message and exits 0 — it never
+crashes and never fabricates a number for a mode that didn't actually run,
+per CLAUDE.md's guardrail.
+
+**How to run it:**
+
+```bash
+pip install -r requirements.txt   # adds groq + python-dotenv
+cp .env.example .env              # then edit .env and set GROQ_API_KEY
+python eval/run_real_eval.py
+```
+
+It is a separate, opt-in script — `eval/run_eval.py` is unchanged and
+still runs instantly, offline, for free, as the default eval.
+
+**Honesty about verification.** The code path was built and is covered by
+mocked unit tests
+([`tests/test_groq_qa.py`](../tests/test_groq_qa.py),
+[`tests/test_run_real_eval.py`](../tests/test_run_real_eval.py)) that
+inject a fake Groq client to prove the prompt is built correctly, the
+response is parsed correctly, and scoring/tallying is correct — independent
+of what a real model says. What those tests cannot prove, because no
+`GROQ_API_KEY` was available in the environment this was built in, is what
+a real model actually answers, or the real baseline-vs-structured accuracy
+numbers on `budget_test.xlsx`. No number from a live run of
+`run_real_eval.py` appears anywhere in this repo. The first real run — and
+the real numbers it produces — is expected to happen once a user supplies
+their own key.
 
 ## Extending eval to document/diagram
 

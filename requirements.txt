@@ -35,3 +35,10 @@ jsonschema>=4.20
 fastapi>=0.110
 uvicorn>=0.27
 python-multipart>=0.0.9
+
+# Real task-accuracy Q&A (qa/groq_qa.py, eval/run_real_eval.py, webapp's
+# POST /api/ask) — the LLM-backed eval docs/eval-methodology.md describes
+# as not yet built. Requires a real GROQ_API_KEY to actually call the
+# model; importing qa/groq_qa.py itself never requires network access.
+groq>=0.11
+python-dotenv>=1.0

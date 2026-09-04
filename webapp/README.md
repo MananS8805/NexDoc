@@ -64,7 +64,7 @@ error message in the page — never a raw stack trace or a silent failure
 
 ```
 webapp/
-  main.py            FastAPI app: one page route, one upload endpoint
+  main.py            FastAPI app: page route, upload endpoint, ask endpoints
   static/
     index.html         the page shell
     styles.css          the design language from design/preprocessing-pipeline-mock.html,
@@ -103,3 +103,31 @@ On failure (unsupported/corrupt file, or a real adapter error):
 
 with `400` for a bad/unsupported input and `500` for the adapter itself
 raising — the same distinction `run_adapter.py` draws.
+
+### `GET /api/ask/status`, `POST /api/ask` — real, Groq-backed Q&A
+
+After a file is analyzed, the page shows an "Ask a question" box. This
+wires the real task-accuracy Q&A path (`qa/groq_qa.py`,
+[`docs/eval-methodology.md`](../docs/eval-methodology.md)) into the UI —
+it is not a mock or a canned response.
+
+`GET /api/ask/status` reports `{"available": bool, "detail": str}` by
+checking whether `GROQ_API_KEY` is set (no network call). The frontend
+calls this once per page load and disables the input with the honest
+`detail` message (e.g. "GROQ_API_KEY is not set...") when it's `false`,
+rather than letting the user submit a question that's doomed to fail.
+
+`POST /api/ask` takes `{"question": str, "artifact": <the same object as
+doc.realArtifact>}`, builds the structured-JSON context
+(`adapters.common.outputs.to_structured`) from that artifact, and calls
+`qa.groq_qa.ask()` — the exact same function
+[`eval/run_real_eval.py`](../eval/run_real_eval.py) uses, so the Groq-
+calling logic exists in exactly one place. Response on success:
+
+```json
+{ "ok": true, "answer": "a real free-text answer from Groq" }
+```
+
+On failure (empty question, or `qa.groq_qa.GroqQAError` — missing/invalid
+key, or a real Groq API failure): `{"ok": false, "error": "..."}` with
+`400`/`503` respectively — never a raw stack trace.
