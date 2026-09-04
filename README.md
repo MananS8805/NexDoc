@@ -68,15 +68,19 @@ the console. Errors (missing file, unrecognized format, a corrupt file) are
 reported clearly and exit non-zero — never a raw traceback for an expected
 failure mode.
 
-**Eval**: the one real, measured accuracy comparison so far is the
-spreadsheet adapter's:
+**Eval**: the deterministic, measured accuracy comparison for the
+spreadsheet adapter:
 
 ```bash
 python eval/run_eval.py
 ```
 
 This needs no API key — it's a deterministic fact-lookup eval, not an LLM
-benchmark. What that distinction means and why: [`docs/eval-methodology.md`](docs/eval-methodology.md).
+benchmark. A separate, opt-in real task-accuracy eval also exists —
+`eval/run_real_eval.py` actually calls a Groq-hosted LLM and scores its
+answers, but requires a real `GROQ_API_KEY` (copy `.env.example` to `.env`
+first). What the distinction between the two evals means and why:
+[`docs/eval-methodology.md`](docs/eval-methodology.md).
 
 **Local web app**: the same pipeline, wrapped in a local-only interactive UI
 so you can drag a file in instead of typing a command:
@@ -118,6 +122,9 @@ adapters/
   diagram/adapter.py       .png/.jpg -> schema, OpenCV shape + line detection
 eval/
   run_eval.py              deterministic fact-lookup eval (spreadsheet only, for now)
+  run_real_eval.py         real, Groq-backed task-accuracy eval (needs GROQ_API_KEY, opt-in)
+qa/
+  groq_qa.py               shared Groq Q&A call, used by run_real_eval.py and webapp's /api/ask
 docs/
   schema.json              the shared JSON Schema, with inline field descriptions
   eval-methodology.md      what "eval" means here and its real limits

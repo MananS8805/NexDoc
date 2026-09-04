@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 out/
 .venv/
+
+# Real secrets — copy .env.example to .env locally and fill in a real
+# GROQ_API_KEY; never commit the real file.
+.env

@@ -19,7 +19,7 @@ or
 Both print the local URL (default http://127.0.0.1:8000) on startup. Only
 127.0.0.1 is bound — this is not meant to be reachable from another machine.
 
-Request flow for the one real endpoint (`POST /api/analyze`):
+Request flow for the main endpoint (`POST /api/analyze`):
 
     uploaded file -> temp file on disk -> adapters.router.build_artifact_for
     (the exact function run_adapter.py's CLI uses) -> scripts/build_prototype's
@@ -28,10 +28,18 @@ Request flow for the one real endpoint (`POST /api/analyze`):
 
 No routing logic, adapter logic, or output-shaping logic is duplicated here;
 every real transformation happens in adapters/ and scripts/build_prototype.py.
+
+Two smaller endpoints wire the real Groq-backed task-accuracy Q&A
+(`qa/groq_qa.py`) into the same page: `GET /api/ask/status` reports whether
+`GROQ_API_KEY` is configured (no network call), and `POST /api/ask` answers
+a question about the artifact currently shown, by calling the exact same
+`qa.groq_qa.ask()` function `eval/run_real_eval.py` uses — no Groq-calling
+logic is duplicated here either.
 """
 
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 import tempfile
@@ -43,6 +51,7 @@ from typing import Any
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -167,6 +176,55 @@ def _build_doc(kind: str, tmp_path: Path, artifact: dict[str, Any], original_fil
         }
     doc["pageLabel"] = f"{artifact['kind']} · {original_filename}"
     return doc
+
+
+class AskRequest(BaseModel):
+    question: str
+    artifact: dict[str, Any]
+
+
+@app.get("/api/ask/status")
+def ask_status() -> JSONResponse:
+    """Lets the frontend know, before the user types anything, whether the
+    "Ask a question" box can actually work — the same honest-up-front
+    pattern the document/diagram adapters use for Tesseract availability.
+    No network call: this only checks whether GROQ_API_KEY is set.
+    """
+    from qa.groq_qa import api_key_status
+
+    available, detail = api_key_status()
+    return JSONResponse({"available": available, "detail": detail})
+
+
+@app.post("/api/ask")
+def ask(request: AskRequest) -> JSONResponse:
+    """Answers a natural-language question about the artifact the user just
+    analyzed, using the exact same `qa.groq_qa.ask()` the real
+    task-accuracy eval (`eval/run_real_eval.py`) uses — no Groq-calling
+    logic is duplicated here. The artifact's structured region list
+    (`adapters.common.outputs.to_structured`) is the context handed to the
+    model; see qa/groq_qa.py's module docstring for why that representation
+    specifically.
+    """
+    if not request.question.strip():
+        return _error(400, "Question is empty.")
+
+    from adapters.common.outputs import to_structured
+    from qa.groq_qa import GroqQAError, ask as ask_groq
+
+    try:
+        context = json.dumps(to_structured(request.artifact), indent=2, default=str)
+    except Exception as exc:
+        return _error(400, f"Could not read the artifact sent with this question: {exc}")
+
+    try:
+        answer = ask_groq(request.question, context)
+    except GroqQAError as exc:
+        # Missing/invalid key or a real Groq API failure — reported clearly,
+        # never a raw stack trace and never a fabricated answer.
+        return _error(503, str(exc))
+
+    return JSONResponse({"ok": True, "answer": answer})
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
