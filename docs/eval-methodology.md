@@ -120,13 +120,39 @@ mocked unit tests
 [`tests/test_run_real_eval.py`](../tests/test_run_real_eval.py)) that
 inject a fake Groq client to prove the prompt is built correctly, the
 response is parsed correctly, and scoring/tallying is correct — independent
-of what a real model says. What those tests cannot prove, because no
-`GROQ_API_KEY` was available in the environment this was built in, is what
-a real model actually answers, or the real baseline-vs-structured accuracy
-numbers on `budget_test.xlsx`. No number from a live run of
-`run_real_eval.py` appears anywhere in this repo. The first real run — and
-the real numbers it produces — is expected to happen once a user supplies
-their own key.
+of what a real model says.
+
+**A real key was supplied and this has now actually been run once**, on
+`openai/gpt-oss-120b` via Groq. Real, measured result:
+
+```
+baseline (flattened CSV) task accuracy:        1/6 = 17%
+structured (common schema JSON) task accuracy: 6/6 = 100%
+```
+
+Structured hit the same ceiling the deterministic eval (distinction (1))
+already found — every fact is recoverable, and the model reliably recovers
+it. The baseline scoring *1/6 instead of 0/6* is the interesting part, and
+worth understanding rather than treating as noise: q2 asks for
+`Actuals!B6` (`=SUM(B3:B5)`), a formula cell that — like every formula cell
+in this fixture — comes through blank in the flattened CSV. The model
+answered "4980" correctly anyway. It didn't recover a hidden value; the
+three literal inputs the formula sums (`B3=1150`, `B4=2950`, `B5=880`) are
+still individually visible as plain numbers elsewhere in the same CSV, and
+the model added them itself. That's a real capability the deterministic
+fact-lookup eval cannot see, by construction — it only checks the exact
+cell a question names, never reasons across other cells the way a model
+can. It's also exactly the "different, stronger claim" distinction (2)
+exists to measure: a model given the baseline can sometimes *partially*
+route around missing structure by re-deriving it, something a direct code
+lookup never attempts. Notably, this reconstruction wasn't reliable even
+within this one run: q1, q3, and q6 ask for the exact same kind of thing
+(another row's SUM total, individually visible inputs still present in the
+CSV) and the model did *not* reconstruct any of them correctly this time —
+so "sometimes" is doing real work in that sentence, not "always when
+possible." q4 (a cross-sheet relationship) and q5 (why a formula fails to
+resolve) ask for something no amount of re-summation could recover
+regardless. All five of those failed, giving the observed 1/6.
 
 ## Extending eval to document/diagram
 

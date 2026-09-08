@@ -19,7 +19,7 @@ verifiable by running the commands.
 
 | Adapter | Status | Real, measured eval? |
 |---|---|---|
-| [Spreadsheet](adapters/spreadsheet/README.md) | Done, deterministic, no model calls | Yes — 0% baseline vs. 100% structured on the test fixture (see below) |
+| [Spreadsheet](adapters/spreadsheet/README.md) | Done, deterministic, no model calls | Yes, two evals — deterministic fact-lookup: 0% vs. 100%; real Groq LLM task-accuracy: 17% vs. 100% (see below) |
 | [Document](adapters/document/README.md) | Done, hybrid text-layer + OCR | No eval harness yet — see [`docs/eval-methodology.md`](docs/eval-methodology.md) |
 | [Diagram](adapters/diagram/README.md) | Done, OpenCV detection + reconstruction | No eval harness yet |
 
@@ -78,9 +78,13 @@ python eval/run_eval.py
 This needs no API key — it's a deterministic fact-lookup eval, not an LLM
 benchmark. A separate, opt-in real task-accuracy eval also exists —
 `eval/run_real_eval.py` actually calls a Groq-hosted LLM and scores its
-answers, but requires a real `GROQ_API_KEY` (copy `.env.example` to `.env`
-first). What the distinction between the two evals means and why:
-[`docs/eval-methodology.md`](docs/eval-methodology.md).
+answers, and requires a real `GROQ_API_KEY` (copy `.env.example` to `.env`
+first). Run once with a real key: baseline 1/6 (17%), structured 6/6
+(100%) — see [`docs/eval-methodology.md`](docs/eval-methodology.md) for
+what the distinction between the two evals means, why, and one genuinely
+interesting real finding from that run (the model partially reconstructing
+one blank formula result by summing its visible inputs itself — something
+the deterministic eval can't see by construction).
 
 **Local web app**: the same pipeline, wrapped in a local-only interactive UI
 so you can drag a file in instead of typing a command:

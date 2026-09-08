@@ -2626,7 +2626,7 @@ const DOCS = [
     "kind": "document",
     "adapter": "Document adapter",
     "title": "invoice_born_digital",
-    "meta": "7 regions \u00b7 1 check flagged",
+    "meta": "7 regions \u00b7 all checks passed",
     "pageLabel": "document \u00b7 invoice_born_digital.pdf",
     "regions": [
       {
@@ -2786,8 +2786,8 @@ const DOCS = [
       },
       {
         "name": "ocr-engine-available",
-        "passed": false,
-        "detail": "Tesseract not available (TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.) \u2014 no effect on this document, it has no scanned pages"
+        "passed": true,
+        "detail": "not checked \u2014 this document has no scanned pages"
       }
     ],
     "realArtifact": {
@@ -2886,8 +2886,8 @@ const DOCS = [
         },
         {
           "name": "ocr-engine-available",
-          "passed": false,
-          "detail": "Tesseract not available (TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.) \u2014 no effect on this document, it has no scanned pages"
+          "passed": true,
+          "detail": "not checked \u2014 this document has no scanned pages"
         }
       ]
     }
@@ -2897,7 +2897,7 @@ const DOCS = [
     "kind": "diagram",
     "adapter": "Diagram adapter",
     "title": "flowchart_clean",
-    "meta": "7 regions \u00b7 1 check flagged",
+    "meta": "7 regions \u00b7 all checks passed",
     "pageLabel": "diagram \u00b7 flowchart_clean.png",
     "regions": [
       {
@@ -2906,7 +2906,7 @@ const DOCS = [
         "shape": "node",
         "language": null,
         "confidence": 0.97,
-        "text": null,
+        "text": "Start: new vendor request",
         "relationships": [],
         "typeLabel": "node-1 \u00b7 node (node)",
         "lang": null,
@@ -2923,7 +2923,7 @@ const DOCS = [
         "shape": "node-decision",
         "language": null,
         "confidence": 0.93,
-        "text": null,
+        "text": "Credit check passes?",
         "relationships": [],
         "typeLabel": "node-2 \u00b7 node (node-decision)",
         "lang": null,
@@ -2940,7 +2940,7 @@ const DOCS = [
         "shape": "node",
         "language": null,
         "confidence": 0.97,
-        "text": null,
+        "text": "Approve vendor",
         "relationships": [],
         "typeLabel": "node-3 \u00b7 node (node)",
         "lang": null,
@@ -2957,7 +2957,7 @@ const DOCS = [
         "shape": "node",
         "language": null,
         "confidence": 0.97,
-        "text": null,
+        "text": "Request additional documents",
         "relationships": [],
         "typeLabel": "node-4 \u00b7 node (node)",
         "lang": null,
@@ -2974,7 +2974,7 @@ const DOCS = [
         "shape": "edge",
         "language": null,
         "confidence": 0.872,
-        "text": null,
+        "text": "no",
         "relationships": [
           {
             "type": "connects-to",
@@ -3000,7 +3000,7 @@ const DOCS = [
         "shape": "edge",
         "language": null,
         "confidence": 0.8541,
-        "text": null,
+        "text": "yes",
         "relationships": [
           {
             "type": "connects-to",
@@ -3057,13 +3057,13 @@ const DOCS = [
       {
         "from": "node-2",
         "to": "node-4",
-        "label": null,
+        "label": "no",
         "confidence": 0.872
       },
       {
         "from": "node-2",
         "to": "node-3",
-        "label": null,
+        "label": "yes",
         "confidence": 0.8541
       },
       {
@@ -3082,8 +3082,8 @@ const DOCS = [
       },
       {
         "name": "ocr-engine-available",
-        "passed": false,
-        "detail": "Tesseract not available (TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.) \u2014 7 node/edge label(s) could not be OCR'd; shape and topology detection are unaffected, since they don't use OCR"
+        "passed": true,
+        "detail": "EasyOCR reader ready (languages: en, hi, CPU)"
       }
     ],
     "realArtifact": {
@@ -3102,7 +3102,7 @@ const DOCS = [
           "shape": "node",
           "language": null,
           "confidence": 0.97,
-          "text": null,
+          "text": "Start: new vendor request",
           "relationships": []
         },
         {
@@ -3111,7 +3111,7 @@ const DOCS = [
           "shape": "node-decision",
           "language": null,
           "confidence": 0.93,
-          "text": null,
+          "text": "Credit check passes?",
           "relationships": []
         },
         {
@@ -3120,7 +3120,7 @@ const DOCS = [
           "shape": "node",
           "language": null,
           "confidence": 0.97,
-          "text": null,
+          "text": "Approve vendor",
           "relationships": []
         },
         {
@@ -3129,7 +3129,7 @@ const DOCS = [
           "shape": "node",
           "language": null,
           "confidence": 0.97,
-          "text": null,
+          "text": "Request additional documents",
           "relationships": []
         },
         {
@@ -3138,7 +3138,7 @@ const DOCS = [
           "shape": "edge",
           "language": null,
           "confidence": 0.872,
-          "text": null,
+          "text": "no",
           "relationships": [
             {
               "type": "connects-to",
@@ -3156,7 +3156,7 @@ const DOCS = [
           "shape": "edge",
           "language": null,
           "confidence": 0.8541,
-          "text": null,
+          "text": "yes",
           "relationships": [
             {
               "type": "connects-to",
@@ -3195,8 +3195,8 @@ const DOCS = [
         },
         {
           "name": "ocr-engine-available",
-          "passed": false,
-          "detail": "Tesseract not available (TesseractNotFoundError: tesseract is not installed or it's not in your PATH. See README file for more information.) \u2014 7 node/edge label(s) could not be OCR'd; shape and topology detection are unaffected, since they don't use OCR"
+          "passed": true,
+          "detail": "EasyOCR reader ready (languages: en, hi, CPU)"
         }
       ]
     }

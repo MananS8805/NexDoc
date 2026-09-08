@@ -207,6 +207,56 @@ If you hit this exact `TypeError` again on some future OpenCV release, it
 means a line's *encoding* changed (not just an extra wrapping dimension) —
 that's a genuinely new incompatibility, not a regression of this fix.
 
+## Fixed bugs: found by testing against a UML sequence diagram
+
+The adapter had only ever been tested against flowchart-style diagrams
+(boxes, diamonds, circles). Pointed at a real, unseen diagram type — a UML
+sequence diagram, with actor header boxes, vertical dashed lifelines, thin
+tall activation bars, and horizontal call/return arrows — two real bugs
+surfaced immediately, diagnosed with actual contour numbers rather than
+guessed at:
+
+1. **Ordinary rectangles were coming back as `node-circle`.** A shape's
+   drawn stroke produces two contours (an outer and inner ring — the same
+   duplicate-ring fact already known for circles, see above). On this
+   fixture's actor boxes, anti-aliasing nudged the *outer* ring's
+   `approxPolyDP` result to 5 vertices instead of 4, so it fell through to
+   the ellipse check — and its fill ratio (0.841) happened to land inside
+   the ellipse pre-filter band (0.70–0.86) and its fit error cleared
+   `ELLIPSE_FIT_ERROR_MAX`, so it registered as a real, if marginal,
+   ellipse match. The *inner* ring resolved to a clean 4-vertex rectangle,
+   correctly. `_dedup_nodes` then discarded the correct one: it broke ties
+   between overlapping candidates by area alone, and a stroke's outer ring
+   is always the larger of the two. **Fix**: dedup now sorts non-circle
+   classifications before `node-circle` ones, falling back to area only
+   within the same shape category (the genuine same-shape ring-duplicate
+   case this logic was originally written for, still handled the same
+   way). All three actor boxes on `sequence_diagram_clean.png` now
+   correctly come back as `node`, confidence 0.97.
+
+2. **Thin, elongated shapes (activation bars) were silently missed
+   entirely.** `0.02 * perimeter` is dominated by an activation bar's long
+   dimension (~15px wide × ~300px tall), so the resulting epsilon exceeded
+   the bar's own width — Douglas-Peucker collapsed both long parallel sides
+   into what looked like one line, leaving only 2 vertices instead of 4,
+   and it didn't qualify for the ellipse fallback either (its fill ratio,
+   ~0.92, sits above the ellipse band). **Fix**: epsilon is now capped at
+   `min(0.02 * perimeter, 0.4 * min(w, h))` — this only changes behavior
+   for shapes whose short dimension is small relative to their perimeter
+   (exactly the elongated case); verified directly that
+   `flowchart_clean.png` and `flowchart_with_circle.png` produce byte-for-
+   byte the same shape classifications as before this change
+   (`tests/test_diagram_sequence_shape.py::test_existing_fixtures_are_unaffected_...`).
+
+With both fixed, `sequence_diagram_clean.png` goes from **3 nodes, 0
+edges, all misclassified** to **5 nodes (3 correctly-labeled actor
+rectangles + 2 unlabeled activation-bar rectangles), 3 real message edges**
+with correct topology and OCR'd labels ("request", "4. response") on the
+edges that carried one. Full before/after numbers, and the remaining honest
+gap (the `Database` activation bar, deliberately drawn short in the test
+fixture, still doesn't clear `MIN_NODE_AREA` — see "Known limitations"
+below), are in `tests/test_diagram_sequence_shape.py`'s module docstring.
+
 ## Known limitations (Phase 3 scope, not bugs)
 
 - Rectangle, diamond, and now circle/ellipse node shapes are recognized
@@ -253,6 +303,47 @@ that's a genuinely new incompatibility, not a regression of this fix.
   labels correctly straight from the raw bounding box — so this is no
   longer a live limitation, though the defensive inset (`_ellipse_label_bbox`)
   is still applied for `node-circle`.
+- **UML sequence diagrams are only partially handled, honestly measured on
+  `sequence_diagram_clean.png`**: actor boxes and normally-sized activation
+  bars now detect correctly (see "Fixed bugs" above), but a *very* short
+  activation bar (the fixture's `Database` bar, 16px × 100px = 1600px²)
+  still falls below `MIN_NODE_AREA` (3000px²) and is missed — this wasn't
+  raised because activation-bar detection in general is unreliable, it's
+  the same area-threshold limitation any small shape has, just easier to
+  hit with a short bar than a normal flowchart box. One real, measured
+  consequence: the message edge that should have connected the missing bar
+  to the Server activation bar instead snapped onto the *Server actor
+  header box* — the nearest node that does exist — producing a
+  topologically wrong edge rather than no edge at all. This adapter does
+  not currently detect "this edge's best match is implausibly far away,
+  treat it as unmatched instead of forcing a connection" — every edge
+  candidate that clears `ENDPOINT_TO_NODE_MAX_DIST` gets attached to
+  *some* node, even a wrong one, if the right one was never detected.
+  Lowering `MIN_NODE_AREA` was deliberately not done to patch this one
+  fixture — that risks new noise false-positives elsewhere and is exactly
+  the "tune it until the one test case passes" anti-pattern this project
+  avoids; a real fix would need either a smarter area threshold (relative
+  to the image/shapes already found, not a fixed pixel count) or a
+  maximum-plausible-edge-length sanity check independent of node
+  detection.
+- **Dashed connectors work, but only within Hough's gap tolerance.**
+  `sequence_diagram_clean.png`'s dashed return arrows (10px dash, 8px gap)
+  were correctly detected as single edges — `HOUGH_MAX_LINE_GAP` (8)
+  happens to bridge that exact gap. A dash pattern with a larger gap would
+  likely fragment into multiple short segments, some possibly below
+  `HOUGH_MIN_LINE_LENGTH` and dropped. This is a real, calibration-
+  dependent limitation, not a claim that dashed lines are unsupported in
+  general — measured to work at this specific dash/gap size, not proven to
+  work at every size.
+- **Long vertical lifelines were not observed to produce false-positive
+  edges** on this fixture — likely because both ends of a lifeline's
+  Hough-detected segments tend to match the same actor node (rejected by
+  the `idx_a == idx_b` guard) or fall outside `ENDPOINT_TO_NODE_MAX_DIST`
+  of any node at all, not because of any lifeline-specific handling. There
+  is no code that recognizes "this is a lifeline, not a message" — the
+  absence of false positives here is an emergent result of the existing
+  distance/matching logic on this one fixture's proportions, not a
+  guarantee for a lifeline drawn at a different length or dash spacing.
 
 ## Test fixtures
 
@@ -275,3 +366,12 @@ is proven on both, plus the pre-existing rectangle/diamond shapes so the
 new detection doesn't accidentally displace them. Looks up a real installed
 TTF (DejaVu Sans) with a fallback to Pillow's bitmap font, so it runs on
 this Linux environment unlike the sibling script above.
+
+`tests/fixtures/generate_diagram_fixture_sequence.py` builds
+`tests/fixtures/sequence_diagram_clean.png`: a UML sequence diagram (3
+actors — Client, Server, Database — dashed lifelines, activation bars, 2
+solid call arrows, 2 dashed return arrows), specifically to test a
+structurally different diagram grammar than any prior fixture. This is
+what surfaced both bugs described in "Fixed bugs" above; see
+`tests/test_diagram_sequence_shape.py` for the regression tests built from
+it.

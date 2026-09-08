@@ -28,6 +28,8 @@ FIXTURES = {
     "document (born-digital)": ROOT / "tests" / "fixtures" / "invoice_born_digital.pdf",
     "document (scanned)": ROOT / "tests" / "fixtures" / "note_scanned.pdf",
     "diagram": ROOT / "tests" / "fixtures" / "flowchart_clean.png",
+    "diagram (circle/ellipse shapes)": ROOT / "tests" / "fixtures" / "flowchart_with_circle.png",
+    "diagram (sequence-diagram-shaped)": ROOT / "tests" / "fixtures" / "sequence_diagram_clean.png",
 }
 
 

@@ -204,8 +204,28 @@ def _dedup_nodes(nodes: list[dict]) -> list[dict]:
     larger (outer, visually more accurate) of any two heavily-overlapping
     candidates.
     """
+    # Prefer a clean rectangle/diamond match over a "node-circle" match at
+    # (nearly) the same bbox, before falling back to area. A real, confirmed
+    # case this matters for: an ordinary rectangle's stroke produces both an
+    # outer and inner ring contour (the same duplicate-ring issue already
+    # known for circles); if anti-aliasing nudges the *outer* ring's corner
+    # count to 5 instead of 4, it can fall through to the ellipse check
+    # instead, and — since a squarish shape can coincidentally clear the
+    # ellipse fill-ratio band and fit error too — get misclassified as
+    # node-circle. The *inner* ring usually still resolves to a clean
+    # 4-vertex rectangle. Area-only tie-breaking would keep the larger,
+    # wrongly-classified outer/ellipse candidate every time, since a
+    # stroke's outer ring is always slightly bigger than its inner one.
+    # Reproduced directly on tests/fixtures/sequence_diagram_clean.png's
+    # actor boxes before this fix (all three came back "node-circle").
+    # Area still breaks ties within the same shape category — that's the
+    # genuine ring-duplicate case (two node-circle candidates for one real
+    # circle), unaffected by this change.
+    def _dedup_sort_key(n: dict) -> tuple[bool, float]:
+        return (n["shape"] == "node-circle", -n["area"])
+
     kept: list[dict] = []
-    for cand in sorted(nodes, key=lambda n: -n["area"]):
+    for cand in sorted(nodes, key=_dedup_sort_key):
         if any(_bbox_iou(cand["bbox"], k["bbox"]) > NODE_DEDUP_IOU_THRESHOLD for k in kept):
             continue
         kept.append(cand)
@@ -220,8 +240,22 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
         if area < MIN_NODE_AREA:
             continue
         perimeter = cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
         x, y, w, h = cv2.boundingRect(contour)
+        # 0.02*perimeter alone under-serves a thin, elongated shape (e.g. a
+        # UML sequence diagram's activation bar, ~15px wide x 300px tall):
+        # its perimeter is dominated by the long dimension, so that epsilon
+        # can exceed the shape's own short dimension and Douglas-Peucker
+        # collapses two long parallel sides down to a single line, losing
+        # 2 of the 4 real corners. Capping epsilon relative to min(w, h) too
+        # keeps thin shapes' corners intact without changing anything for
+        # normally-proportioned shapes, where min(w, h) is large enough that
+        # this second term never binds — verified directly: this fixes a
+        # real, reproducing 4-vertex-detection failure on
+        # tests/fixtures/sequence_diagram_clean.png's activation bars
+        # without changing a single node/edge count on flowchart_clean.png
+        # or flowchart_with_circle.png.
+        epsilon = max(1.0, min(0.02 * perimeter, 0.4 * min(w, h)))
+        approx = cv2.approxPolyDP(contour, epsilon, True)
         bbox_area = w * h
         fill_ratio = area / bbox_area if bbox_area else 0
 
