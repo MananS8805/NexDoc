@@ -163,16 +163,46 @@ table.recon-grid .cell-value{ text-align:right; }
 table.recon-grid .cell-low{ outline:1.5px solid var(--flag); outline-offset:-1.5px; }
 table.recon-grid td.cell-empty{ background:var(--surface); }
 
-/* -- diagram reconstruction -- */
+/* -- diagram reconstruction --
+   Real geometry/topology, styled with more visual weight than the first
+   pass: a soft drop shadow to lift shapes off the page, a dotted-grid
+   backdrop consistent with the rest of the app's "page-frame" look,
+   thicker/rounder strokes, and hover/active states wired to the same
+   selectRegion() the structured tab and abstract preview already use — so
+   clicking a shape here highlights the same region everywhere else. */
 .recon-diagram{ width:100%; }
-.recon-diagram svg{ width:100%; height:auto; display:block; background:var(--surface); }
-.recon-diagram .rc-node{ fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.6; }
+.recon-diagram svg{
+  width:100%; height:auto; display:block; border-radius:var(--radius-sm);
+  background-image:
+    repeating-linear-gradient(0deg, var(--line) 0 1px, transparent 1px 20px),
+    repeating-linear-gradient(90deg, var(--line) 0 1px, transparent 1px 20px);
+  background-color:var(--surface);
+}
+.recon-diagram .rc-node{
+  fill:var(--accent-soft); stroke:var(--accent); stroke-width:1.8; stroke-linejoin:round;
+  cursor:pointer; filter:drop-shadow(0 2px 3px rgba(16,30,25,0.18));
+  transition:filter 120ms ease, stroke-width 120ms ease;
+}
+.recon-diagram .rc-node:hover{ filter:drop-shadow(0 3px 6px rgba(16,30,25,0.28)); }
 .recon-diagram .rc-node.low{ fill:var(--flag-soft); stroke:var(--flag); }
-.recon-diagram .rc-edge{ stroke:var(--ink-soft); stroke-width:1.6; fill:none; }
-.recon-diagram .rc-edge.low{ stroke:var(--flag); }
-.recon-diagram .rc-label{ font-family:'IBM Plex Sans', sans-serif; fill:var(--ink); text-anchor:middle; dominant-baseline:middle; }
-.recon-diagram .rc-edge-label{ font-family:var(--font-mono); fill:var(--ink-soft); text-anchor:middle; }
-.recon-diagram .rc-edge-label-bg{ fill:var(--surface); opacity:0.92; }
+.recon-diagram .rc-node.active{ stroke-width:3; filter:drop-shadow(0 3px 8px rgba(16,30,25,0.32)); }
+.recon-diagram .rc-edge{
+  stroke:var(--ink-soft); stroke-width:1.8; stroke-linecap:round; fill:none; cursor:pointer;
+  transition:stroke-width 120ms ease, stroke 120ms ease;
+}
+.recon-diagram .rc-edge:hover{ stroke:var(--ink); stroke-width:2.6; }
+.recon-diagram .rc-edge.low{ stroke:var(--flag); stroke-dasharray:3 2; }
+.recon-diagram .rc-edge.active{ stroke:var(--accent); stroke-width:2.8; }
+.recon-diagram .rc-hit{ stroke:transparent; stroke-width:7; fill:none; cursor:pointer; } /* wider invisible hit-target over a thin edge line */
+.recon-diagram .rc-label{
+  font-family:'Space Grotesk', sans-serif; font-weight:500; fill:var(--ink);
+  text-anchor:middle; dominant-baseline:middle; pointer-events:none;
+}
+.recon-diagram .rc-edge-label{ font-family:var(--font-mono); font-size:2.6px; fill:var(--ink-soft); text-anchor:middle; pointer-events:none; }
+.recon-diagram .rc-edge-label-bg{ fill:var(--surface); stroke:var(--line); stroke-width:0.3; opacity:0.95; rx:1.4; pointer-events:none; }
+.recon-legend{ display:flex; gap:var(--space-4); flex-wrap:wrap; margin-top:var(--space-3); font-size:12px; color:var(--ink-soft); }
+.recon-legend span{ display:inline-flex; align-items:center; gap:6px; }
+.recon-legend .swatch{ width:12px; height:12px; border-radius:3px; display:inline-block; flex:none; }
 
 /* -- document reconstruction -- */
 .recon-doc{ max-width:70ch; margin:0 auto; }
@@ -245,19 +275,37 @@ table.recon-grid td.cell-empty{ background:var(--surface); }
   background-color:var(--surface);
 }
 
+.preview-image{
+  position:absolute; left:0; width:100%; object-fit:contain; object-position:top;
+  background:var(--surface); display:block; pointer-events:none;
+}
+.preview-page-label{
+  position:absolute; left:var(--space-2); font-family:var(--font-mono); font-size:10px;
+  color:var(--ink-faint); background:rgba(251,251,248,0.85); padding:1px 6px; border-radius:999px;
+  pointer-events:none;
+}
+
 .region{
-  position:absolute; border:1px solid var(--line-strong); border-radius:3px;
-  background:rgba(30,138,114,0.04); cursor:pointer;
+  position:absolute; border:1.5px solid var(--line-strong); border-radius:3px;
+  background:rgba(30,138,114,0.06); cursor:pointer;
   transition:background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
+/* Once a real image sits behind the overlay, a faint fill reads as a smudge
+   on top of real content — outline-only, with the fill reserved for hover/
+   active state, keeps the underlying page/diagram legible. */
+.page-frame:has(.preview-image) .region{ background:transparent; }
+.page-frame:has(.preview-image) .region:hover{ background:rgba(30,138,114,0.12); }
+.page-frame:has(.preview-image) .region.low:hover{ background:rgba(193,89,46,0.14); }
 .region.low{ border-color:var(--flag); background:rgba(193,89,46,0.07); }
 .region.active{ border-color:var(--accent); background:rgba(30,138,114,0.14); box-shadow:0 0 0 3px var(--accent-soft); }
 .region.active.low{ border-color:var(--flag); box-shadow:0 0 0 3px var(--flag-soft); }
 .region.shape-node{ border-radius:999px; }
 .region.shape-node-decision{ border-radius:6px; border-style:dashed; }
+.region.shape-node-circle{ border-radius:50%; }
 .region.shape-edge{ background:rgba(251,251,248,0.6); border-style:dashed; }
+.page-frame:has(.preview-image) .region.shape-edge{ background:transparent; }
 .region.shape-edge .region-label{ font-style:italic; }
-.region-label{ position:absolute; top:3px; left:5px; font-family:var(--font-mono); font-size:9px; letter-spacing:0.02em; color:var(--ink-faint); pointer-events:none; }
+.region-label{ position:absolute; top:3px; left:5px; font-family:var(--font-mono); font-size:9px; letter-spacing:0.02em; color:var(--ink-faint); pointer-events:none; text-shadow:0 0 3px var(--surface), 0 0 3px var(--surface); }
 .scanline{ position:absolute; left:0; right:0; top:0; height:2px; background:linear-gradient(90deg, transparent, var(--accent), transparent); opacity:0; }
 .scanline.run{ animation:sweep 1.4s ease-in-out 1; }
 @keyframes sweep{ 0%{ top:0; opacity:0; } 8%{ opacity:1; } 92%{ opacity:1; } 100%{ top:100%; opacity:0; } }

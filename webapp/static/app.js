@@ -178,12 +178,58 @@ function renderChecks(){
 
 function renderPreview(runScan){
   const frame = document.getElementById('pageFrame');
-  frame.querySelectorAll('.region').forEach(el => el.remove());
-  frame.classList.toggle('grid-bg', doc.kind === 'spreadsheet');
+  frame.querySelectorAll('.region, .preview-image, .preview-page-label').forEach(el => el.remove());
+
+  // Real pixels from the file the user actually uploaded (doc.previewImages
+  // — one entry for a diagram, one per page for a document), not just the
+  // abstract confidence-colored boxes below. A spreadsheet has no bitmap of
+  // itself; previewImages is null for that kind and the grid-bg fallback
+  // (an approximation of "a spreadsheet," not the literal file) still runs.
+  const images = doc.previewImages || [];
+  const hasImages = images.length > 0;
+  frame.classList.toggle('grid-bg', doc.kind === 'spreadsheet' && !hasImages);
+
+  const sub = document.getElementById('previewSub');
+  if(hasImages){
+    sub.textContent = '— the actual uploaded file, with detected regions overlaid';
+  } else if(doc.kind === 'spreadsheet'){
+    sub.textContent = '— cell grid reconstructed from parsed values (no bitmap original to preview)';
+  } else {
+    sub.textContent = '— region boxes by type/confidence (no image preview available for this file)';
+  }
+
+  // A single image (a diagram, or a one-page document) gets the frame's own
+  // aspect ratio so it isn't squished into the fixed portrait default.
+  // Multiple document pages keep that fixed frame and stack inside it by
+  // percentage — the exact layout doc.regions[].box already assumes for a
+  // multi-page document (each page gets an equal vertical band; see
+  // scripts/build_prototype.py's _compute_boxes_document), so page images
+  // are placed at the same per-page band their regions' boxes already use,
+  // not independently sized — otherwise a region's overlay box would land
+  // on the wrong page's image.
+  frame.style.aspectRatio = (images.length === 1) ? (images[0].width + ' / ' + images[0].height) : '';
+
+  const bandHeight = hasImages ? 100 / images.length : 0;
+  images.forEach((img, i) => {
+    const imgEl = document.createElement('img');
+    imgEl.className = 'preview-image';
+    imgEl.src = img.dataUrl;
+    imgEl.alt = img.pageLabel || 'Uploaded file preview';
+    imgEl.style.top = (i * bandHeight) + '%';
+    imgEl.style.height = bandHeight + '%';
+    frame.appendChild(imgEl);
+    if(img.pageLabel && images.length > 1){
+      const label = document.createElement('div');
+      label.className = 'preview-page-label';
+      label.style.top = (i * bandHeight) + '%';
+      label.textContent = img.pageLabel;
+      frame.appendChild(label);
+    }
+  });
 
   const noPreview = document.getElementById('noPreview');
   const hasBoxes = doc.regions.some(r => r.box);
-  noPreview.hidden = hasBoxes;
+  noPreview.hidden = hasImages || hasBoxes;
 
   doc.regions.forEach(r => {
     if(!r.box) return;
@@ -247,6 +293,17 @@ function bindReconEvents(){
     btn.addEventListener('click', () => {
       reconActiveSheet = btn.dataset.sheet;
       renderRecon();
+    });
+  });
+  // Diagram reconstruction: clicking a shape (or its invisible wider hit
+  // target, .rc-hit, for thin edge lines) highlights the same region
+  // everywhere else in the page — the abstract preview overlay and the
+  // structured tab both already key off activeRegionId.
+  document.querySelectorAll('.recon-diagram [data-region-id]').forEach(el => {
+    el.setAttribute('tabindex', '0');
+    el.addEventListener('click', () => selectRegion(el.dataset.regionId));
+    el.addEventListener('keydown', e => {
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectRegion(el.dataset.regionId); }
     });
   });
 }
@@ -389,16 +446,18 @@ function reconDiagramHtml(regions){
     const box = svgBox[n.id];
     const c = center(box);
     const lowCls = n.confidence < 0.85 ? ' low' : '';
+    const activeCls = n.id === activeRegionId ? ' active' : '';
+    const idAttr = ' data-region-id="' + escapeHtml(n.id) + '"';
     if(n.shape === 'node-decision'){
       const hx = box.width / 2, hy = box.height / 2;
       const pts = [[c.x, c.y - hy], [c.x + hx, c.y], [c.x, c.y + hy], [c.x - hx, c.y]]
         .map(p => p[0].toFixed(2) + ',' + p[1].toFixed(2)).join(' ');
-      shapesSvg += '<polygon class="rc-node' + lowCls + '" points="' + pts + '"/>';
+      shapesSvg += '<polygon class="rc-node' + lowCls + activeCls + '"' + idAttr + ' points="' + pts + '"/>';
     } else if(n.shape === 'node-circle'){
-      shapesSvg += '<ellipse class="rc-node' + lowCls + '" cx="' + c.x.toFixed(2) + '" cy="' + c.y.toFixed(2) +
+      shapesSvg += '<ellipse class="rc-node' + lowCls + activeCls + '"' + idAttr + ' cx="' + c.x.toFixed(2) + '" cy="' + c.y.toFixed(2) +
         '" rx="' + (box.width / 2).toFixed(2) + '" ry="' + (box.height / 2).toFixed(2) + '"/>';
     } else {
-      shapesSvg += '<rect class="rc-node' + lowCls + '" x="' + box.left.toFixed(2) + '" y="' + box.top.toFixed(2) +
+      shapesSvg += '<rect class="rc-node' + lowCls + activeCls + '"' + idAttr + ' x="' + box.left.toFixed(2) + '" y="' + box.top.toFixed(2) +
         '" width="' + box.width.toFixed(2) + '" height="' + box.height.toFixed(2) + '" rx="1.4"/>';
     }
     const label = shortLabel(n.text);
@@ -419,30 +478,44 @@ function reconDiagramHtml(regions){
     const start = clipToBox(fromC, toC, fromBox);
     const end = clipToBox(toC, fromC, toBox);
     const lowCls = e.confidence < 0.85 ? ' low' : '';
-    const marker = e.confidence < 0.85 ? 'rc-arrow-low' : 'rc-arrow';
-    edgesSvg += '<line class="rc-edge' + lowCls + '" x1="' + start.x.toFixed(2) + '" y1="' + start.y.toFixed(2) +
-      '" x2="' + end.x.toFixed(2) + '" y2="' + end.y.toFixed(2) + '" marker-end="url(#' + marker + ')"/>';
+    const activeCls = e.id === activeRegionId ? ' active' : '';
+    const idAttr = ' data-region-id="' + escapeHtml(e.id) + '"';
+    const marker = e.confidence < 0.85 ? 'rc-arrow-low' : (e.id === activeRegionId ? 'rc-arrow-active' : 'rc-arrow');
+    const coords = ' x1="' + start.x.toFixed(2) + '" y1="' + start.y.toFixed(2) + '" x2="' + end.x.toFixed(2) + '" y2="' + end.y.toFixed(2) + '"';
+    // A wide, invisible line drawn first (so it never blocks the visible
+    // stroke) makes the thin real edge line actually clickable/hoverable —
+    // a 1.8px stroke is otherwise a frustratingly small hit target.
+    edgesSvg += '<line class="rc-hit"' + idAttr + coords + '/>';
+    edgesSvg += '<line class="rc-edge' + lowCls + activeCls + '"' + idAttr + coords + ' marker-end="url(#' + marker + ')"/>';
     const label = shortLabel(e.text);
     if(label){
       const mx = (start.x + end.x) / 2, my = (start.y + end.y) / 2;
       const w = Math.max(8, label.length * 1.9);
       edgesSvg += '<rect class="rc-edge-label-bg" x="' + (mx - w / 2).toFixed(2) + '" y="' + (my - 2.6).toFixed(2) +
         '" width="' + w.toFixed(2) + '" height="4.4"/>';
-      edgesSvg += '<text class="rc-edge-label" x="' + mx.toFixed(2) + '" y="' + (my + 1).toFixed(2) + '" font-size="2.8">' +
+      edgesSvg += '<text class="rc-edge-label" x="' + mx.toFixed(2) + '" y="' + (my + 1).toFixed(2) + '">' +
         escapeHtml(label) + '</text>';
     }
   });
 
   const defs = '<defs>' +
-    '<marker id="rc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">' +
+    '<marker id="rc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="2" markerHeight="2" orient="auto">' +
     '<path d="M0,0 L10,5 L0,10 z" fill="var(--ink-soft)"/></marker>' +
-    '<marker id="rc-arrow-low" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">' +
+    '<marker id="rc-arrow-low" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="2" markerHeight="2" orient="auto">' +
     '<path d="M0,0 L10,5 L0,10 z" fill="var(--flag)"/></marker>' +
+    '<marker id="rc-arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="2" markerHeight="2" orient="auto">' +
+    '<path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>' +
     '</defs>';
+
+  const legend = '<div class="recon-legend">' +
+    '<span><span class="swatch" style="background:var(--accent-soft);border:1.5px solid var(--accent)"></span>high confidence</span>' +
+    '<span><span class="swatch" style="background:var(--flag-soft);border:1.5px solid var(--flag)"></span>low confidence · review</span>' +
+    '<span>click a shape to see it in the structured tab</span>' +
+    '</div>';
 
   return '<div class="recon-diagram" style="aspect-ratio:' + DIAGRAM_VIEW_W + '/100">' +
     '<svg viewBox="0 0 ' + DIAGRAM_VIEW_W.toFixed(2) + ' 100" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">' +
-    defs + edgesSvg + shapesSvg + '</svg></div>';
+    defs + edgesSvg + shapesSvg + '</svg></div>' + legend;
 }
 
 /* -- document: regions replayed in their real reading order (the order the
@@ -567,6 +640,7 @@ function selectRegion(id){
   activeRegionId = (activeRegionId === id) ? null : id;
   renderPreview(false);
   renderActiveTab();
+  if(doc.kind === 'diagram') renderRecon();
 }
 
 function confBadge(c){

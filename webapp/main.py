@@ -39,6 +39,7 @@ logic is duplicated here either.
 
 from __future__ import annotations
 
+import base64
 import json
 import shutil
 import sys
@@ -124,9 +125,80 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
             )
 
         doc = _build_doc(kind, tmp_path, artifact, file.filename)
+        try:
+            doc["previewImages"] = _build_preview_images(kind, tmp_path)
+        except Exception:
+            # A real preview image is a display nicety, not the actual
+            # result — if rendering it fails for some reason (a corrupt
+            # page mid-document, an unusual image codec), the analysis
+            # itself already succeeded and should still be returned rather
+            # than turning a working request into a 500.
+            traceback.print_exc()
+            doc["previewImages"] = None
         return JSONResponse({"ok": True, "doc": doc})
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _png_data_url(png_bytes: bytes) -> str:
+    return "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+
+
+def _build_preview_images(kind: str, tmp_path: Path) -> list[dict[str, Any]] | None:
+    """Real pixels from the file the user actually uploaded — not the
+    abstract confidence-colored box overlay `renderPreview()` already drew
+    (that stays; this is additive). Returns a list of
+    `{dataUrl, width, height, pageLabel}` — one entry for a diagram's single
+    image, one per page for a document — or `None` when there's no bitmap
+    representation to show (a spreadsheet has no "picture of itself"; the
+    existing cell-grid preview already covers that case honestly).
+
+    Runs against `tmp_path` before the caller's `finally: shutil.rmtree`
+    deletes it — this endpoint still writes nothing to disk beyond that
+    same temp file every other step here already uses, and the images are
+    embedded directly in the JSON response rather than served from a
+    second endpoint, so nothing persists server-side after the response is
+    sent.
+    """
+    if kind == "diagram":
+        from PIL import Image
+
+        with Image.open(tmp_path) as img:
+            img = img.convert("RGB")
+            width, height = img.size
+            import io
+
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return [{"dataUrl": _png_data_url(buf.getvalue()), "width": width, "height": height, "pageLabel": None}]
+
+    if kind == "document":
+        import fitz
+
+        pages = []
+        doc = fitz.open(tmp_path)
+        try:
+            for page in doc:
+                # 150dpi: readable text, small enough to embed several pages
+                # directly in one JSON response without the payload getting
+                # unreasonable — this is a preview image, not an archival
+                # scan, so it doesn't need to match the OCR pass's own
+                # working resolution (adapters/document/adapter.py renders
+                # at 200dpi for that separate purpose).
+                pix = page.get_pixmap(dpi=150)
+                pages.append(
+                    {
+                        "dataUrl": _png_data_url(pix.tobytes("png")),
+                        "width": pix.width,
+                        "height": pix.height,
+                        "pageLabel": f"Page {page.number + 1}",
+                    }
+                )
+        finally:
+            doc.close()
+        return pages
+
+    return None  # spreadsheet: no bitmap representation; frontend keeps the cell-grid preview
 
 
 def _build_doc(kind: str, tmp_path: Path, artifact: dict[str, Any], original_filename: str) -> dict[str, Any]:
