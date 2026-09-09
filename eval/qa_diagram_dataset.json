@@ -1,0 +1,45 @@
+[
+  {
+    "id": "g1",
+    "question": "What does the starting node say?",
+    "check": "label_value",
+    "ref": "node-1",
+    "expect_substring": "Start: new vendor request"
+  },
+  {
+    "id": "g2",
+    "question": "What question does the decision diamond ask?",
+    "check": "label_value",
+    "ref": "node-2",
+    "expect_substring": "Credit check passes?"
+  },
+  {
+    "id": "g3",
+    "question": "If the credit check fails ('no'), what happens next?",
+    "check": "topology_target",
+    "ref": "edge-1",
+    "expect_substring": "Request additional documents"
+  },
+  {
+    "id": "g4",
+    "question": "If the credit check passes ('yes'), what happens next?",
+    "check": "topology_target",
+    "ref": "edge-2",
+    "expect_substring": "Approve vendor"
+  },
+  {
+    "id": "g5",
+    "question": "What step leads into the credit-check decision?",
+    "check": "topology_target",
+    "ref": "edge-3",
+    "direction": "from",
+    "expect_substring": "Start: new vendor request"
+  },
+  {
+    "id": "g6",
+    "question": "Does every connector in this flowchart connect two real, detected shapes?",
+    "check": "check_result",
+    "ref": "edges-reference-existing-nodes",
+    "expect_substring": "3 edge"
+  }
+]

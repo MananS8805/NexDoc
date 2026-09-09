@@ -20,8 +20,8 @@ verifiable by running the commands.
 | Adapter | Status | Real, measured eval? |
 |---|---|---|
 | [Spreadsheet](adapters/spreadsheet/README.md) | Done, deterministic, no model calls | Yes, two evals — deterministic fact-lookup: 0% vs. 100%; real Groq LLM task-accuracy: 17% vs. 100% (see below) |
-| [Document](adapters/document/README.md) | Done, hybrid text-layer + OCR | No eval harness yet — see [`docs/eval-methodology.md`](docs/eval-methodology.md) |
-| [Diagram](adapters/diagram/README.md) | Done, OpenCV detection + reconstruction | No eval harness yet |
+| [Document](adapters/document/README.md) | Done, hybrid text-layer + OCR | Yes — deterministic fact-lookup: 50% vs. 100% (see [`docs/eval-methodology.md`](docs/eval-methodology.md)) |
+| [Diagram](adapters/diagram/README.md) | Done, OpenCV detection + reconstruction | Yes — deterministic fact-lookup: 0% vs. 100% (see [`docs/eval-methodology.md`](docs/eval-methodology.md)) |
 
 Not built, and explicitly out of scope for this stage: auth/roles/reviewer
 workflow, a live server, hosting, a database. Output is static files only.
@@ -68,23 +68,30 @@ the console. Errors (missing file, unrecognized format, a corrupt file) are
 reported clearly and exit non-zero — never a raw traceback for an expected
 failure mode.
 
-**Eval**: the deterministic, measured accuracy comparison for the
-spreadsheet adapter:
+**Eval**: each of the three adapters has its own deterministic, measured
+accuracy comparison, none needing an API key:
 
 ```bash
-python eval/run_eval.py
+python eval/run_eval.py               # spreadsheet: 0% vs. 100%
+python eval/run_document_eval.py      # document: 50% vs. 100%
+python eval/run_diagram_eval.py       # diagram: 0% vs. 100%
 ```
 
-This needs no API key — it's a deterministic fact-lookup eval, not an LLM
-benchmark. A separate, opt-in real task-accuracy eval also exists —
+These are fact-lookup evals, not LLM benchmarks — see
+[`docs/eval-methodology.md`](docs/eval-methodology.md) for exactly what
+each one measures and the real, verified reason document's split isn't
+stark like the other two (a born-digital PDF's content mostly survives
+flattening; a diagram's and a spreadsheet's formulas don't).
+
+A separate, opt-in real task-accuracy eval also exists for spreadsheet —
 `eval/run_real_eval.py` actually calls a Groq-hosted LLM and scores its
 answers, and requires a real `GROQ_API_KEY` (copy `.env.example` to `.env`
 first). Run once with a real key: baseline 1/6 (17%), structured 6/6
-(100%) — see [`docs/eval-methodology.md`](docs/eval-methodology.md) for
-what the distinction between the two evals means, why, and one genuinely
-interesting real finding from that run (the model partially reconstructing
-one blank formula result by summing its visible inputs itself — something
-the deterministic eval can't see by construction).
+(100%) — see the same doc for what the distinction between the two kinds
+of eval means, and one genuinely interesting real finding from that run
+(the model partially reconstructing one blank formula result by summing
+its visible inputs itself — something the deterministic eval can't see by
+construction). Document and diagram don't have a task-accuracy eval yet.
 
 **Local web app**: the same pipeline, wrapped in a local-only interactive UI
 so you can drag a file in instead of typing a command:
@@ -125,8 +132,10 @@ adapters/
   document/adapter.py      .pdf -> schema, hybrid text-layer / OCR
   diagram/adapter.py       .png/.jpg -> schema, OpenCV shape + line detection
 eval/
-  run_eval.py              deterministic fact-lookup eval (spreadsheet only, for now)
-  run_real_eval.py         real, Groq-backed task-accuracy eval (needs GROQ_API_KEY, opt-in)
+  run_eval.py              deterministic fact-lookup eval — spreadsheet
+  run_document_eval.py     deterministic fact-lookup eval — document
+  run_diagram_eval.py      deterministic fact-lookup eval — diagram
+  run_real_eval.py         real, Groq-backed task-accuracy eval — spreadsheet only (needs GROQ_API_KEY, opt-in)
 qa/
   groq_qa.py               shared Groq Q&A call, used by run_real_eval.py and webapp's /api/ask
 docs/

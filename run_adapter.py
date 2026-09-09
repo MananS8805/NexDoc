@@ -15,14 +15,16 @@ Detects the artifact type from the file's real content (adapters/router.py
 
 No server, no network calls, no auth — a single offline run over one file.
 
-Eval: the deterministic fact-lookup eval (eval/run_eval.py) needs
-hand-authored ground truth (which cell/region a question is about, and what
-the expected answer is). That only exists today for
-tests/fixtures/budget_test.xlsx. Running this CLI against any other file
+Eval: each of the three kinds has its own deterministic fact-lookup eval
+(eval/run_eval.py, eval/run_document_eval.py, eval/run_diagram_eval.py),
+each needing hand-authored ground truth (which region a question is about,
+and what the expected answer is) that only exists today for one known
+fixture per kind (tests/fixtures/budget_test.xlsx, invoice_born_digital.pdf,
+flowchart_clean.png respectively). Running this CLI against any other file
 does NOT auto-generate questions or fake a score — it says so plainly and
 moves on, unless --eval-questions points at a real question file in the
-same shape as eval/qa_dataset.json (spreadsheet inputs only; document and
-diagram don't have an eval implementation yet).
+matching kind's dataset shape (eval/qa_dataset.json, qa_document_dataset.json,
+or qa_diagram_dataset.json).
 
 Errors are reported clearly and the process exits non-zero — never a raw
 traceback for an expected failure mode (missing file, wrong/corrupt format,
@@ -120,29 +122,33 @@ def main() -> None:
         status = "PASS" if c["passed"] else "FAIL"
         print(f"    [{status}] {c['name']}: {c['detail']}")
 
-    eval_result = None
-    if args.eval_questions:
-        if kind != "spreadsheet":
-            print(
-                f"\neval: --eval-questions was given, but the deterministic eval only understands "
-                f"spreadsheet cell/region lookups today; '{input_path}' is a {kind}. Skipping eval "
-                "rather than faking a score."
-            )
-        else:
-            from run_eval import run as run_eval
+    # Each of the three eval modules exposes the same run(fixture_path, qa_path)
+    # -> dict signature and return shape (n/baseline_pct/structured_pct/...) —
+    # deliberately, so this dispatch and scripts/build_prototype.py's
+    # render_html() can consume any of them uniformly rather than special-
+    # casing spreadsheet the way this used to.
+    EVAL_MODULES = {
+        "spreadsheet": ("run_eval", "eval/qa_dataset.json", "tests/fixtures/budget_test.xlsx"),
+        "document": ("run_document_eval", "eval/qa_document_dataset.json", "tests/fixtures/invoice_born_digital.pdf"),
+        "diagram": ("run_diagram_eval", "eval/qa_diagram_dataset.json", "tests/fixtures/flowchart_clean.png"),
+    }
 
-            print(f"\nRunning eval against '{args.eval_questions}'...")
-            try:
-                eval_result = run_eval(fixture_path=input_path, qa_path=Path(args.eval_questions))
-            except (KeyError, ValueError) as exc:
-                _fail(f"--eval-questions file is malformed: {exc}")
+    eval_result = None
+    module_name, default_qa_path, known_fixture = EVAL_MODULES[kind]
+    if args.eval_questions:
+        module = __import__(module_name)
+        print(f"\nRunning eval against '{args.eval_questions}'...")
+        try:
+            eval_result = module.run(fixture_path=input_path, qa_path=Path(args.eval_questions))
+        except (KeyError, ValueError) as exc:
+            _fail(f"--eval-questions file is malformed: {exc}")
     else:
         print(
             "\neval: not run. The deterministic eval requires hand-authored ground truth "
-            "(which cell/region each question targets, and the expected answer) — that only exists "
-            "today for tests/fixtures/budget_test.xlsx. Run `python eval/run_eval.py` against that "
-            "fixture for a real scored comparison, or supply --eval-questions <path> (spreadsheet "
-            "inputs only, same shape as eval/qa_dataset.json) to score this file."
+            "(which region each question targets, and the expected answer) — that only exists "
+            f"today for {known_fixture}. Run `python eval/{module_name}.py` against that "
+            f"fixture for a real scored comparison, or supply --eval-questions <path> (same shape as "
+            f"{default_qa_path}) to score this file."
         )
 
     from build_prototype import build_doc_for, render_html

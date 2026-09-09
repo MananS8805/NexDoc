@@ -29,22 +29,32 @@ before trusting it)
   (`adapters/router.py`) and CLI (`run_adapter.py`) route any of the three
   file types to the correct adapter automatically. See `README.md` for the
   full picture and quickstart.
-- **Two real evals exist for the spreadsheet adapter now.**
-  `eval/run_eval.py` is a deterministic fact-lookup eval (no LLM call, no
-  API key): baseline 0/6, structured 6/6 on
-  `tests/fixtures/budget_test.xlsx`. `eval/run_real_eval.py` is the
-  real, model-backed task-accuracy eval — it calls a real Groq-hosted LLM
-  (`qa/groq_qa.py`) with the baseline and structured representations and
-  scores its free-text answers against the same `qa_dataset.json`. It
-  requires `GROQ_API_KEY` (see `.env.example`) and is opt-in (a separate
-  script; `run_eval.py` stays the fast/free/keyless default). Its code path
-  is built and covered by mocked unit tests
-  (`tests/test_groq_qa.py`, `tests/test_run_real_eval.py`), but no session
-  building this had a real key, so no live-model result has ever been
-  produced or recorded here — see `docs/eval-methodology.md`'s "Honesty
-  about verification." Documents and diagrams have no eval harness yet
-  (deterministic or real); the UI's comparison bars for those two stay
-  labeled illustrative until one exists. Never present a fabricated or
+- **All three adapters now have a real, deterministic fact-lookup eval.**
+  `eval/run_eval.py` (spreadsheet, `tests/fixtures/budget_test.xlsx`):
+  baseline 0/6, structured 6/6. `eval/run_document_eval.py` (document,
+  `invoice_born_digital.pdf`): baseline 3/6 (50%), structured 6/6.
+  `eval/run_diagram_eval.py` (diagram, `flowchart_clean.png`): baseline
+  0/6, structured 6/6. None require an API key or model call. The document
+  and diagram numbers are deliberately not stark 0%s the way spreadsheet's
+  is — see `docs/eval-methodology.md` for the real, verified reason each
+  one is what it is (a born-digital PDF's content mostly survives
+  flattening; a diagram's doesn't, because whole-image OCR measurably
+  merges/splits labels across shapes). The UI's comparison bars for
+  document/diagram are no longer illustrative placeholders — they show
+  these real numbers.
+- **The spreadsheet adapter additionally has a real, model-backed
+  task-accuracy eval.** `eval/run_real_eval.py` calls a real Groq-hosted
+  LLM (`qa/groq_qa.py`) with the baseline and structured representations
+  and scores its free-text answers against `qa_dataset.json`. Requires
+  `GROQ_API_KEY` (see `.env.example`) and is opt-in (a separate script;
+  `run_eval.py` stays the fast/free/keyless default). **A real key has
+  since been supplied and this has actually been run**: baseline 1/6
+  (17%), structured 6/6 (100%) — see `docs/eval-methodology.md` for the
+  real result and one genuinely interesting finding from that run (the
+  model partially self-reconstructing one blank-formula answer by summing
+  visible inputs itself — inconsistently, not "always when possible").
+  Document and diagram don't have a task-accuracy eval yet — a named,
+  not-yet-built next step, not an oversight. Never present a fabricated or
   estimated number as measured.
 - The web app (`webapp/`) has a real "Ask a question" box wired to
   `qa/groq_qa.py` via `POST /api/ask` — same honest-when-unconfigured

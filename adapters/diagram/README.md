@@ -248,14 +248,82 @@ guessed at:
    byte the same shape classifications as before this change
    (`tests/test_diagram_sequence_shape.py::test_existing_fixtures_are_unaffected_...`).
 
-With both fixed, `sequence_diagram_clean.png` goes from **3 nodes, 0
-edges, all misclassified** to **5 nodes (3 correctly-labeled actor
-rectangles + 2 unlabeled activation-bar rectangles), 3 real message edges**
-with correct topology and OCR'd labels ("request", "4. response") on the
-edges that carried one. Full before/after numbers, and the remaining honest
-gap (the `Database` activation bar, deliberately drawn short in the test
-fixture, still doesn't clear `MIN_NODE_AREA` — see "Known limitations"
-below), are in `tests/test_diagram_sequence_shape.py`'s module docstring.
+With both fixed, `sequence_diagram_clean.png` initially went from **3
+nodes, 0 edges, all misclassified** to **5 nodes (3 correctly-labeled
+actor rectangles + 2 unlabeled activation-bar rectangles), 3 real message
+edges** with correct topology. One honest gap remained at that point: the
+`Database` activation bar (1600px², below `MIN_NODE_AREA`'s 3000px²) was
+still missed, and the edge that should have connected to it instead
+snapped onto the nearest node that *did* exist (the Server actor header
+box) — a topologically wrong edge, not no edge.
+
+3. **The `Database` bar miss, fixed by making the area floor relative
+   instead of a single fixed constant.** Lowering `MIN_NODE_AREA` itself
+   was deliberately rejected — that risks new noise false-positives on
+   every other image and is exactly the "tune it until the one test case
+   passes" anti-pattern this project avoids. Instead, `MIN_NODE_AREA`
+   stays as the primary "definitely real" floor, and a much smaller
+   absolute noise floor (`NOISE_FLOOR_AREA`, 200px²) lets every candidate
+   through classification; a sub-`MIN_NODE_AREA` candidate is then rescued
+   only if its area is at least `RELATIVE_MIN_AREA_FRACTION` (10%) of the
+   **median area of shapes this same image already confirmed are real
+   nodes** — a per-image-relative signal, not a new one-size-fits-all
+   constant — at a discounted confidence
+   (`CONFIDENCE_RELATIVE_AREA_PENALTY`, −0.10) reflecting that "smaller
+   than every other shape found here" is itself real uncertainty. Verified
+   directly on the two existing fixtures — not merely assumed unaffected:
+   `flowchart_clean.png` has no contours in the gap between the two floors
+   at all; `flowchart_with_circle.png` does have one (a 254px² anti-
+   aliasing artifact, real and checked, not hypothetical), but it's
+   correctly rejected by the relative-area gate itself (254px² is far
+   below 10% of this image's real nodes' median size), so the final node
+   list is unaffected either way — `tests/test_diagram_sequence_shape.py`
+   checks the actual output (exact node count and shape set), not the
+   absence of any small contour existing in that range, which turned out
+   to be the wrong thing to assert. `sequence_diagram_clean.png` now detects the
+   `Database` bar as `node-6` at confidence 0.80 (vs. 0.90 for the two
+   normally-sized bars), and **every one of the 4 real message edges now
+   has correct topology**, including the specific case that used to be
+   wrong (the "2. query" edge now correctly connects the Server bar to the
+   `Database` bar instead of the Server actor box).
+
+Final state: `sequence_diagram_clean.png` produces **6 nodes (3
+correctly-labeled actor rectangles + 3 activation-bar rectangles) and 6
+edges** (the 4 real message arrows, all with correct topology, plus 2
+lifeline connectors between an actor header and its own activation bar).
+Full before/after numbers are in `tests/test_diagram_sequence_shape.py`'s
+module docstring.
+
+## Eval
+
+`eval/run_diagram_eval.py` runs a deterministic fact-lookup eval: for each
+question in `eval/qa_diagram_dataset.json`, it checks whether the expected
+fact is present in each representation. No LLM call, no API key, fully
+reproducible offline:
+
+```
+python eval/run_diagram_eval.py
+```
+
+**Real, measured result on `tests/fixtures/flowchart_clean.png`** (6
+questions): baseline (flattened OCR labels) 0/6 = 0%, structured (common
+schema JSON) 6/6 = 100%.
+
+The baseline here — `adapters/diagram/baseline.py`'s `flatten_labels()` —
+runs OCR over the *whole image at once*, with no shape/connector detection
+at all, unlike this adapter's own per-shape *cropped* OCR. That difference
+is exactly why the baseline scores 0 rather than partially: verified
+directly, whole-image OCR groups text purely by vertical position, so it
+measurably merges labels from adjacent shapes onto the same line and
+splits a single multi-word label ("Start: new vendor request") across two
+separate lines — so even the plain label-lookup questions fail, not just
+the topology ones. This wasn't designed in for effect; the eval dataset
+originally expected label lookups to pass on both sides (the way they do
+for the document adapter) and was corrected to reflect what a real run
+actually showed.
+
+Full methodology is in
+[`docs/eval-methodology.md`](../../docs/eval-methodology.md#the-diagram-eval-evalrun_diagram_evalpy).
 
 ## Known limitations (Phase 3 scope, not bugs)
 
@@ -303,29 +371,14 @@ below), are in `tests/test_diagram_sequence_shape.py`'s module docstring.
   labels correctly straight from the raw bounding box — so this is no
   longer a live limitation, though the defensive inset (`_ellipse_label_bbox`)
   is still applied for `node-circle`.
-- **UML sequence diagrams are only partially handled, honestly measured on
-  `sequence_diagram_clean.png`**: actor boxes and normally-sized activation
-  bars now detect correctly (see "Fixed bugs" above), but a *very* short
-  activation bar (the fixture's `Database` bar, 16px × 100px = 1600px²)
-  still falls below `MIN_NODE_AREA` (3000px²) and is missed — this wasn't
-  raised because activation-bar detection in general is unreliable, it's
-  the same area-threshold limitation any small shape has, just easier to
-  hit with a short bar than a normal flowchart box. One real, measured
-  consequence: the message edge that should have connected the missing bar
-  to the Server activation bar instead snapped onto the *Server actor
-  header box* — the nearest node that does exist — producing a
-  topologically wrong edge rather than no edge at all. This adapter does
-  not currently detect "this edge's best match is implausibly far away,
-  treat it as unmatched instead of forcing a connection" — every edge
-  candidate that clears `ENDPOINT_TO_NODE_MAX_DIST` gets attached to
-  *some* node, even a wrong one, if the right one was never detected.
-  Lowering `MIN_NODE_AREA` was deliberately not done to patch this one
-  fixture — that risks new noise false-positives elsewhere and is exactly
-  the "tune it until the one test case passes" anti-pattern this project
-  avoids; a real fix would need either a smarter area threshold (relative
-  to the image/shapes already found, not a fixed pixel count) or a
-  maximum-plausible-edge-length sanity check independent of node
-  detection.
+- **UML sequence diagrams — the `Database` activation-bar miss is now
+  fixed** (see "Fixed bugs" above for the full before/after). A very short
+  shape can still theoretically fall below both the absolute and the
+  relative rescue floor in a diagram with no larger confirmed nodes to
+  compare it against (the relative rescue needs at least one shape that
+  clears `MIN_NODE_AREA` normally to compute a reference size from) — not
+  observed on any current fixture, flagged as a real edge case rather than
+  assumed impossible.
 - **Dashed connectors work, but only within Hough's gap tolerance.**
   `sequence_diagram_clean.png`'s dashed return arrows (10px dash, 8px gap)
   were correctly detected as single edges — `HOUGH_MAX_LINE_GAP` (8)

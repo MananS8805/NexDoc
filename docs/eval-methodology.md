@@ -2,26 +2,33 @@
 
 ## What exists today
 
-Two real evals now exist for the spreadsheet adapter:
+**All three adapters now have a real, deterministic fact-lookup eval** —
+closing the gap this document used to describe as the biggest one against
+CLAUDE.md's "measurable downstream improvement" criterion:
 
-- [`eval/run_eval.py`](../eval/run_eval.py) — the deterministic
-  fact-lookup eval, scoring the spreadsheet adapter's structured output
-  against a naive flatten-to-CSV baseline on
+- [`eval/run_eval.py`](../eval/run_eval.py) — spreadsheet, against
   `tests/fixtures/budget_test.xlsx`. Result: baseline 0/6, structured 6/6.
-  Documented with its full caveats in
-  [`adapters/spreadsheet/README.md`](../adapters/spreadsheet/README.md#eval).
-  No API key, no model call, runs in under a second — this stays the
-  default eval.
-- [`eval/run_real_eval.py`](../eval/run_real_eval.py) — the real
-  task-accuracy eval described below, added to close the gap this document
-  used to describe as unbuilt. It requires a `GROQ_API_KEY` and is opt-in
-  (a separate script, not a flag that changes `run_eval.py`'s default
-  behavior).
+- [`eval/run_document_eval.py`](../eval/run_document_eval.py) — document,
+  against `tests/fixtures/invoice_born_digital.pdf`. Result: baseline 3/6
+  (50%), structured 6/6 (100%).
+- [`eval/run_diagram_eval.py`](../eval/run_diagram_eval.py) — diagram,
+  against `tests/fixtures/flowchart_clean.png`. Result: baseline 0/6,
+  structured 6/6.
 
-Documents and diagrams have **no eval harness at all yet**. The UI
-prototype's comparison bars for those two kinds are illustrative targets
-carried over from the original design mock — not measurements, and stated
-as such directly in the prototype's own text.
+No API key, no model call for any of the three — each runs in a few
+seconds, offline, and stays the default eval for its kind. See "The
+document eval" and "The diagram eval" below for what each one measures and
+why the numbers differ so much from each other (they are not tuned to
+match — see each section for the real, honest reason).
+
+Spreadsheet additionally has a real Groq-backed task-accuracy eval
+(`eval/run_real_eval.py`, opt-in, requires `GROQ_API_KEY`) — a genuinely
+different, stronger claim than the deterministic evals above. See "The
+real task-accuracy eval" below. Document and diagram do not have a
+task-accuracy eval yet — a natural next extension once a key is available
+and authorized for that purpose, reusing the same
+`qa_document_dataset.json`/`qa_diagram_dataset.json` datasets, but not
+built now (out of scope of this pass).
 
 ## The one distinction that matters: what is actually being measured
 
@@ -154,23 +161,98 @@ possible." q4 (a cross-sheet relationship) and q5 (why a formula fails to
 resolve) ask for something no amount of re-summation could recover
 regardless. All five of those failed, giving the observed 1/6.
 
-## Extending eval to document/diagram
+## The document eval (`eval/run_document_eval.py`)
 
-Neither adapter has a `qa_dataset.json`-equivalent yet, because that
-requires hand-authoring ground truth: which field of `invoice_born_digital.pdf`
-does a question target, or which edge of `flowchart_clean.png`. This is
-explicit, deliberate scope-narrowing, not an oversight — `run_adapter.py`
-says so directly when pointed at a file with no matching eval:
+Verified directly before designing this: `page.get_text("blocks")`
+(PyMuPDF, no adapter logic at all) on `tests/fixtures/invoice_born_digital.pdf`
+is **line-for-line identical** to what the real adapter's `to_text()`
+produces. This is the key, honest difference from the spreadsheet eval —
+a born-digital PDF does **not** lose facts by being flattened to plain
+text the way a spreadsheet's formula cells do. So
+[`adapters/document/baseline.py`](../adapters/document/baseline.py)'s
+naive baseline (block-level text extraction, no classification, no
+relationship inference, no OCR fallback for a scanned page) genuinely
+keeps most of what a question could ask about.
 
-```
-eval: not run. The deterministic eval requires hand-authored ground truth
-(which cell/region each question targets, and the expected answer) — that
-only exists today for tests/fixtures/budget_test.xlsx. ...
-```
+**What it measures**, via `eval/qa_document_dataset.json`'s three check
+types: `field_value` (a direct text lookup — expected to pass on **both**
+sides, and it does), `relationship_target` (does this representation know
+which line items a total sums? — the baseline is restricted to only the
+named region's own text, never the whole blob, so it structurally cannot
+answer), and `region_type` (does this representation know a line's
+semantic role, e.g. "total-field" vs. just another line of prose? — raw
+text never contains a literal type tag).
 
-Building one for documents would look like `eval/qa_dataset.json` but with
-`sheet`/`ref` replaced by a region id from that PDF's real
-`page1!blockN` scheme; for diagrams, by a `node-N`/`edge-N` id. The check
-functions in `eval/run_eval.py` (`_check_cell_value`, etc.) would need
-document/diagram-specific counterparts, since they currently parse
-spreadsheet-shaped CSV grids specifically.
+**Real, measured result**: baseline 3/6 = 50%, structured 6/6 = 100%. Not
+a stark 0% — that would have been a fabricated-looking number forced by
+picking only-favorable questions, and this project doesn't do that. The
+honest claim here is narrower and more precise than the spreadsheet
+eval's: a document's *content* mostly survives flattening; what never
+survives is *semantic role and structural relationships* — exactly
+CLAUDE.md's actual claim about generic pipelines, stated exactly, not
+inflated.
+
+## The diagram eval (`eval/run_diagram_eval.py`)
+
+A diagram has no natural "flattened text" the way a spreadsheet or
+document does. The honest naive-pipeline equivalent —
+[`adapters/diagram/baseline.py`](../adapters/diagram/baseline.py)'s
+`flatten_labels()` — runs OCR over the *whole image at once* with no
+shape or connector detection at all: just every visible string, in an
+unordered bag, with zero node/edge ids and zero topology. This is a
+direct, real illustration of CLAUDE.md's claim that image-only processing
+fails specifically at connection topology.
+
+**What it measures**, via `eval/qa_diagram_dataset.json`'s three check
+types: `label_value` (is this specific shape's label recoverable at all?),
+`topology_target` (what does this connector lead to? — the baseline
+**always** fails here by construction, not by a substring search missing:
+a flat bag of labels has zero connectivity data for any label, ever — a
+cleaner, more absolute illustration than the spreadsheet eval's
+cross-sheet-ref check, whose baseline failure is a coincidence of one
+unevaluated formula rather than a structural impossibility), and
+`check_result` (baseline has no artifact-level validation concept at all).
+
+**Real, measured result**: baseline 0/6, structured 6/6 — starker than
+the document eval, and for a real, specific, measured reason worth
+stating plainly rather than assuming: whole-image OCR (unlike the real
+adapter's per-shape *cropped* OCR) groups text purely by vertical
+position, so it measurably **merges labels from adjacent shapes onto the
+same line** and **splits a single multi-word label across two lines**.
+Both effects are visible directly in a real run of
+`flatten_labels()` — e.g. `"Start: new vendor request"` comes back as two
+separate lines, `"Start: new vendor"` and `"request"`, so even a simple
+`label_value` question that would trivially pass with per-shape OCR fails
+here. This was not designed in — the eval dataset originally assumed
+label lookups would pass on both sides (as they do for documents), and
+was corrected to reflect what a real run actually showed, per the "never
+fabricate, never force a target number" rule.
+
+## Deliberately scoped out of both new evals, and why
+
+- `tests/fixtures/note_scanned.pdf` (document) — would need a second,
+  OCR-specific naive-baseline path (this one only handles born-digital
+  pages), and its Hindi content deserves its own script-correctness
+  ground truth rather than being folded into this dataset.
+- `tests/fixtures/flowchart_with_circle.png` (diagram) — a second clean
+  fixture proving the same claim again; not needed for this eval's
+  purpose.
+- `tests/fixtures/sequence_diagram_clean.png` (diagram) — **not** a
+  scope-narrowing choice, an ordering one: this fixture had an
+  already-diagnosed adapter bug (see
+  [`adapters/diagram/README.md`](../adapters/diagram/README.md)'s "Fixed
+  bugs") at the time these evals were designed. Building eval ground truth
+  against a fixture with a known-wrong extraction would have conflated
+  "eval gap" with "adapter bug" in the same dataset — fix the bug first,
+  eval it second, not both in one pass.
+
+## Extending eval to a real task-accuracy measure for document/diagram
+
+Both new datasets already name what each question tests structurally via
+their `check` field, the same design choice `qa_dataset.json` made
+originally — so a Groq-backed task-accuracy eval for document/diagram
+(mirroring `eval/run_real_eval.py`) is a small, mechanical extension
+whenever a key is available and its use is authorized for that purpose:
+ask the model the question given each representation as context, score
+its free-text answer the same way. Not built now — out of scope of this
+pass, named here so it isn't lost.

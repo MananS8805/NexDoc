@@ -160,11 +160,21 @@ paths of that check are exercised, not just the happy path.
 
 ## Known limitations (Phase 1 scope, not bugs)
 
-- The formula evaluator only understands `SUM(range)`, a bare cross-sheet
-  cell reference, and `SUM(range) + cross-sheet cell`. Anything else (other
-  functions, multi-range SUMs, arithmetic beyond a single `+`) resolves as
+- The formula evaluator now understands `SUM`/`AVERAGE`/`COUNT`/`MAX`/`MIN`
+  over a range, a bare cross-sheet cell reference, any number of these
+  joined by `+` (same-sheet ranges, same-sheet cells, and cross-sheet
+  cells in any mix — not just the original single "range + cross-sheet
+  cell" combination), and a minimal `IF(cell op number, true, false)` where
+  both branches are a literal or a same-sheet cell. This is still a
+  deliberately small, hand-written evaluator, not a general formula engine:
+  no nested `IF`, no string functions, no arithmetic operator besides `+`,
+  no multi-condition logic, no other aggregate functions
+  (`SUMIF`/`COUNTIF`/`VLOOKUP`/etc.). Anything outside this set resolves as
   "unresolved (unsupported formula pattern)" at 0.40 confidence rather than
-  being evaluated incorrectly.
+  being evaluated incorrectly — verified with a dedicated fixture
+  (`tests/fixtures/formula_extras_test.xlsx`,
+  `tests/test_spreadsheet_adapter.py`) covering every newly-added pattern,
+  not just claimed to work.
 - Header/title detection is positional (first merged range = title, first
   plain row after it = header), not driven by cell styling. A sheet with no
   merged title and no obvious header row will misclassify its first row as

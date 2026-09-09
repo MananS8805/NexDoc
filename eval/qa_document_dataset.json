@@ -1,0 +1,44 @@
+[
+  {
+    "id": "d1",
+    "question": "What company issued this invoice?",
+    "check": "field_value",
+    "ref": "page1!block0",
+    "expect_substring": "Lumière Textiles SARL"
+  },
+  {
+    "id": "d2",
+    "question": "What is the invoice date?",
+    "check": "field_value",
+    "ref": "page1!block1",
+    "expect_substring": "14/08/2024"
+  },
+  {
+    "id": "d3",
+    "question": "What is the line total for the 'Coton peigné' item?",
+    "check": "field_value",
+    "ref": "page1!block5",
+    "expect_substring": "1600.00 EUR"
+  },
+  {
+    "id": "d4",
+    "question": "Which line items make up the invoice's grand total?",
+    "check": "relationship_target",
+    "ref": "page1!block6",
+    "expect_substring": "Soie brute"
+  },
+  {
+    "id": "d5",
+    "question": "Has this invoice's total been verified against its line items?",
+    "check": "check_result",
+    "ref": "total-matches-line-items",
+    "expect_substring": "4500.00"
+  },
+  {
+    "id": "d6",
+    "question": "What semantic role does the 'Montant total' line play in this document?",
+    "check": "region_type",
+    "ref": "page1!block6",
+    "expect_substring": "total-field"
+  }
+]

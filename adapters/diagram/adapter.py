@@ -70,7 +70,23 @@ from adapters.common.schema import Artifact, Check, Region, Relationship, Source
 ADAPTER_NAME = "Diagram adapter"
 ADAPTER_VERSION = "0.1.0"
 
-MIN_NODE_AREA = 3000  # px^2 — below this, a closed contour is noise, not a node
+MIN_NODE_AREA = 3000  # px^2 — the primary "this is definitely a real shape" floor
+# A hard-coded absolute floor alone has a real, diagnosed failure mode: a UML
+# sequence diagram's activation bar can be legitimately real and much
+# smaller than a typical flowchart box (measured case: 1600px^2 vs this
+# 3000px^2 constant, on tests/fixtures/sequence_diagram_clean.png — see
+# adapters/diagram/README.md's "Known limitations"/"Fixed bugs"). Lowering
+# MIN_NODE_AREA itself to rescue that one case would risk new noise false-
+# positives on every other image, since it's a fixed floor with no
+# knowledge of what "normal" looks like in a given picture. Instead,
+# NOISE_FLOOR_AREA is a much smaller absolute floor (true single/few-pixel
+# noise never clears it), and a second, relative check below rescues a
+# candidate between the two floors only when it's a real fraction of the
+# size of shapes *this same image* already confirmed are real nodes — a
+# per-image-relative signal, not a new one-size-fits-all constant.
+NOISE_FLOOR_AREA = 200  # px^2 — below this, never a real shape in any image, just noise
+RELATIVE_MIN_AREA_FRACTION = 0.10  # a sub-MIN_NODE_AREA candidate is rescued if area >= this fraction of the median confirmed-node area in the same image
+CONFIDENCE_RELATIVE_AREA_PENALTY = 0.10  # subtracted from a relative-rescued node's confidence — "smaller than every other shape found here" is itself a real uncertainty signal
 AXIS_ALIGNED_TOLERANCE_DEG = 20  # how far from horizontal/vertical an edge can be and still count as "axis-aligned"
 NODE_PADDING = 10  # px, grown around a node's bbox before masking it out for edge detection
 HOUGH_MIN_LINE_LENGTH = 40  # px — shorter than this is treated as arrowhead clutter, not a connector shaft
@@ -237,7 +253,7 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
     nodes = []
     for contour in contours:
         area = cv2.contourArea(contour)
-        if area < MIN_NODE_AREA:
+        if area < NOISE_FLOOR_AREA:
             continue
         perimeter = cv2.arcLength(contour, True)
         x, y, w, h = cv2.boundingRect(contour)
@@ -277,7 +293,15 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
                 # than forced into one bucket.
                 shape = "node"
                 confidence = 0.6
-            nodes.append({"bbox": (x, y, x + w, y + h), "shape": shape, "confidence": confidence, "area": area})
+            nodes.append(
+                {
+                    "bbox": (x, y, x + w, y + h),
+                    "shape": shape,
+                    "confidence": confidence,
+                    "area": area,
+                    "below_primary_threshold": area < MIN_NODE_AREA,
+                }
+            )
             continue
 
         # Not a clean 4-vertex polygon — before giving up (the prior
@@ -291,11 +315,44 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
             if fit_error <= ELLIPSE_FIT_ERROR_MAX:
                 confidence = _ellipse_confidence(fit_error)
                 nodes.append(
-                    {"bbox": (x, y, x + w, y + h), "shape": "node-circle", "confidence": confidence, "area": area}
+                    {
+                        "bbox": (x, y, x + w, y + h),
+                        "shape": "node-circle",
+                        "confidence": confidence,
+                        "area": area,
+                        "below_primary_threshold": area < MIN_NODE_AREA,
+                    }
                 )
         # else: neither rectangle, diamond, nor circle/ellipse — honestly
         # missed, same as any other unrecognized shape (see README's "Known
         # limitations").
+
+    # Relative rescue: a candidate below MIN_NODE_AREA is kept only if it's
+    # a real fraction of the size of shapes this same image already
+    # confirmed are nodes — never based on a fixed constant tuned against a
+    # different image. An image with no confirmed nodes at all (median is
+    # undefined) rescues nothing, honestly, rather than guessing a
+    # reference size out of nowhere.
+    confirmed_areas = sorted(n["area"] for n in nodes if not n["below_primary_threshold"])
+    median_area = None
+    if confirmed_areas:
+        mid = len(confirmed_areas) // 2
+        median_area = (
+            confirmed_areas[mid]
+            if len(confirmed_areas) % 2
+            else (confirmed_areas[mid - 1] + confirmed_areas[mid]) / 2
+        )
+
+    kept: list[dict] = []
+    for n in nodes:
+        if not n.pop("below_primary_threshold"):
+            kept.append(n)
+        elif median_area is not None and n["area"] >= RELATIVE_MIN_AREA_FRACTION * median_area:
+            n["confidence"] = round(max(0.35, n["confidence"] - CONFIDENCE_RELATIVE_AREA_PENALTY), 4)
+            kept.append(n)
+        # else: below both the absolute and the relative floor — genuinely
+        # too small to be a real shape in this image, honestly missed.
+    nodes = kept
 
     nodes = _dedup_nodes(nodes)
     # Reading order: top-to-bottom, then left-to-right.

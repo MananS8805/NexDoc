@@ -2,7 +2,22 @@
 
 ## Status
 
-Accepted, implemented in [`eval/run_eval.py`](../../eval/run_eval.py). Superseded-later candidate — see "Revisit when."
+Accepted, implemented in [`eval/run_eval.py`](../../eval/run_eval.py).
+
+**Status update — the "Revisit when" condition below has been met.** A
+real `GROQ_API_KEY` was later supplied and authorized, and
+[`eval/run_real_eval.py`](../../eval/run_real_eval.py) was built and
+actually run: baseline 1/6 (17%), structured 6/6 (100%) — see
+[`docs/eval-methodology.md`](../eval-methodology.md). This ADR's decision
+was *not* superseded by that — both evals exist side by side, exactly as
+"Consequences" below anticipated ("a task-accuracy eval alongside, not
+necessarily replacing, this one"). The deterministic eval this ADR
+describes is still the default for spreadsheet and is now also built for
+document and diagram (`eval/run_document_eval.py`,
+`eval/run_diagram_eval.py`) — this ADR's reasoning (a real, weaker,
+honestly-labeled claim beats blocking on a credential) generalized cleanly
+to those two as well, independent of any LLM key ever being available for
+them.
 
 ## Context
 

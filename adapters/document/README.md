@@ -196,6 +196,39 @@ Three artifact-level checks, per `Check{name, passed, detail}`:
   `_iter_regions`'s lazy-probe comment for why forcing that load would be
   pure waste for a document that never needed OCR in the first place.
 
+## Eval
+
+`eval/run_document_eval.py` runs a deterministic fact-lookup eval: for each
+question in `eval/qa_document_dataset.json`, it looks up the specific
+region the question is about — never the whole flattened blob — and checks
+whether the expected fact is present there. No LLM call, no API key, fully
+reproducible offline:
+
+```
+python eval/run_document_eval.py
+```
+
+**Real, measured result on `tests/fixtures/invoice_born_digital.pdf`** (6
+questions): baseline (flattened text) 3/6 = 50%, structured (common schema
+JSON) 6/6 = 100%.
+
+Unlike the spreadsheet adapter's stark 0% baseline, this one is
+deliberately not stark, and the reason is real and verified directly:
+`adapters/document/baseline.py`'s naive text extraction
+(`page.get_text("blocks")`, no classification) is line-for-line identical
+to what this adapter's own `to_text()` produces for this fixture — a
+born-digital PDF's content mostly survives being flattened to plain text.
+The three questions the baseline gets right are plain field lookups
+(company name, date, a line-item total). The three it gets wrong ask for
+something flattening genuinely erases regardless of how good the text
+extraction is: which line items a total sums (a relationship), whether the
+total was verified against them (a computed check), and what semantic role
+a line plays (`"total-field"` vs. just another line of prose) — a type
+tag, not a phrase that could ever appear in the prose itself.
+
+Full methodology, including exactly why this split isn't 0%, is in
+[`docs/eval-methodology.md`](../../docs/eval-methodology.md#the-document-eval-evalrun_document_evalpy).
+
 ## Known limitations (Phase 2 scope, not bugs)
 
 - Line-item / total-field detection is a regex over one specific column
