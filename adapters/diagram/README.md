@@ -1,6 +1,6 @@
 # Diagram adapter
 
-Phase 3 of the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
+Phase 3 of nexDoc, the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
 `.png`/`.jpg` diagram into the common node/edge schema via detection +
 reconstruction — classical computer vision (OpenCV contours + Hough line
 detection), not a raw vision-language-model prompt against the whole image.
@@ -128,6 +128,100 @@ Runs the full pipeline once and returns the common-schema artifact.
    a side effect of an unrelated OCR-engine swap) rather than generalized
    to `node-decision` (the diamond), which was never affected by this
    issue under either engine.
+
+## UML activity-diagram shapes
+
+Rectangle/diamond/circle cover flowcharts and sequence diagrams, but a UML
+*activity* diagram uses a different vocabulary the adapter didn't recognize
+at all until now: a small solid **initial node**, a bullseye **final
+node**, solid **fork/join** synchronization bars, **rounded-rectangle**
+activity boxes, and **swimlane** dividers. All five reuse the same contour
+geometry above plus one new real signal none of the rectangle/diamond/
+ellipse checks needed: whether a shape's *interior* is solid or hollow.
+
+**The core problem this solves**: a hollow ring and a solid-filled circle
+of the *identical outer boundary* have the exact same `fill_ratio`
+(contour area ÷ bounding-box area) — that ratio can only describe the
+outer edge, never what's behind it. `_mean_interior_intensity` fills the
+contour, erodes the mask inward by `SOLID_FILL_ERODE_PX` (so a hollow
+shape's own stroke isn't sampled as if it were fill), and averages the
+binary image under what's left. A solid shape reads near-255 there; a
+hollow one reads near-0. This is the one signal that makes every shape
+below possible.
+
+- **`node-initial`**: a round contour (same ellipse-fit path as
+  `node-circle`) that is both solid-filled and no larger than
+  `ACTIVITY_MARKER_MAX_AREA` — a fixed-scale heuristic (this adapter's
+  fixtures run ~700-1000px canvases; see "Known limitations" for the
+  honest scaling caveat), deliberately exempted from the generic
+  `MIN_NODE_AREA` floor since the solid+ellipse-fit combination is already
+  a purpose-built confirmation, not a generic size guess.
+- **`node-final`**: a hollow ring (an ordinary `node-circle` candidate)
+  that contains a smaller solid round contour concentrically inside it —
+  real geometric containment (`_merge_final_node_bullseyes`): the inner
+  dot's bbox center must fall inside the ring's bbox and its area must be
+  under `FINAL_NODE_INNER_MAX_AREA_FRACTION` of the ring's. On a match the
+  inner dot is absorbed into the ring (not emitted as its own region) and
+  the ring's shape becomes `node-final`.
+- **`fork-join`**: a solid-filled, axis-aligned rectangle (the same
+  4-vertex path that already detects `node`) whose aspect ratio clears
+  `FORK_JOIN_MIN_ASPECT_RATIO` (4:1) — a UML fork/join bar is conventionally
+  drawn as a thin, heavily elongated solid bar, unlike a normal activity
+  box. Direction (fork vs. join) isn't inferred from shape at all — both
+  read identically as `fork-join`; see "Known limitations."
+- **`node-activity`**: a rounded-rectangle activity box. Its corners add
+  extra `approxPolyDP` vertices, so it never lands in the clean 4-vertex
+  branch; instead, a contour that fails the ellipse-fit check (rounded
+  rectangles land in the same fill-ratio pre-filter band as real ellipses,
+  but fit one poorly at their flatter sides — the existing fit-error
+  metric is what disambiguates the two, in that order) is checked for
+  axis-alignment via `cv2.minAreaRect`'s synthetic 4-corner box, reusing
+  the same `_edge_angles_deg`/`_is_axis_aligned` helpers rather than
+  depending on OpenCV's own (version-varying) `minAreaRect` angle
+  convention. A high fill ratio (>0.85, same rationale as a sharp
+  rectangle) plus axis-alignment → `node-activity`, at a slightly lower
+  confidence ceiling (0.90) than a crisp 4-vertex rectangle's 0.97, since
+  tolerating >4 vertices is a softer match.
+- **`swimlane`**: a long, straight divider, detected by a *separate*
+  `cv2.HoughLinesP` pass (`_detect_swimlanes`) over the full, unmasked
+  binary image — unlike connector detection, this deliberately does not
+  mask node bounding boxes out first, since a real lane divider can
+  legitimately run behind/through nodes. Its own much longer
+  `minLineLength` (a fraction of the image's shorter dimension) means an
+  ordinary connector can never be mistaken for one. Filtered to segments
+  within `SWIMLANE_AXIS_TOLERANCE_DEG` of purely horizontal or vertical
+  and at least `SWIMLANE_MIN_LENGTH_FRAC` (55%) of the image's width or
+  height; near-duplicate detections of the same physical line are
+  collapsed by midpoint proximity. Emitted as its own `type: "swimlane"`
+  region (not `"node"`), so it's automatically excluded from
+  `edges-reference-existing-nodes` and never OCR'd (see below) —
+  swimlanes don't participate in node/edge topology at all in this
+  adapter.
+
+**Labels**: `node-initial`, `node-final`, and `fork-join` are pure UML
+glyphs with no text of their own by convention — OCR is deliberately
+skipped for them (`_NO_LABEL_SHAPES`), which is the correct behavior for a
+shape that was never going to have readable text inside it, not a missed
+case. `node-activity` is OCR'd exactly like a plain `node` rectangle (its
+raw bounding box, no special inset needed — only the curved `node-circle`
+boundary ever needed one).
+
+**A real fixture-building lesson worth stating plainly**: a connector
+touching a *large hollow* rectangle at one point doesn't meaningfully
+perturb its contour (existing fixtures rely on exactly this). A connector
+touching a *small solid* shape — an initial/final marker or a fork/join
+bar — does: `cv2.findContours` treats any touching foreground pixels as
+one connected blob, and for a shape this small relative to a connector's
+width, fusing even a single touching line corrupts the contour enough to
+fail classification entirely. Measured directly while building
+`tests/fixtures/generate_diagram_fixture_activity.py`: before adding a
+small explicit pixel gap between each arrow and the marker/bar it connects
+to, the bullseye final node's outer ring vanished as a candidate entirely,
+and the fork and join bars (with three touching arrows each) merged with
+their connectors into one ~57,000px² unrecognizable blob. This is a
+real property of solid small shapes, not an adapter bug — a production
+diagram tool would need to either leave a visible gap (as most do) or
+this adapter would need contour-splitting logic it doesn't have.
 
 ## Confidence — a real finding, not a clean first draft
 
@@ -397,6 +491,57 @@ Full methodology is in
   absence of false positives here is an emergent result of the existing
   distance/matching logic on this one fixture's proportions, not a
   guarantee for a lifeline drawn at a different length or dash spacing.
+- **UML activity-diagram marker sizing (`ACTIVITY_MARKER_MAX_AREA`) is a
+  fixed pixel-area constant**, not scaled relative to the image the way
+  `MIN_NODE_AREA`'s relative rescue is. It's tuned to this adapter's
+  fixture scale (~700-1000px canvases); a UML diagram exported at a
+  dramatically different resolution could see its initial/final markers
+  either fall outside this ceiling (missed as markers, potentially
+  misread as an oversized `node-circle` instead) or a large solid brand
+  mark/logo elsewhere in the image fall inside it (misread as a marker).
+  Not observed on any current fixture — flagged because the constant is
+  new and genuinely untested at other scales, not because a failure has
+  been seen.
+- **Fork vs. join direction is not distinguished.** Both synchronization
+  bar roles are emitted as the same `fork-join` shape; telling them apart
+  would require comparing incoming vs. outgoing edge counts once
+  topology is known; not implemented, since the shape signal alone
+  can't tell them apart (real UML notation draws both identically).
+- **A connector cannot touch a small solid marker or sync bar without
+  corrupting its contour** — see "UML activity-diagram shapes" above. This
+  fixture's own arrows needed a deliberate small pixel gap near every
+  initial/final/fork/join shape to avoid exactly this; a real-world UML
+  diagram whose connectors touch these shapes pixel-exact (rather than
+  stopping just short, which most diagramming tools do visually anyway)
+  would likely lose that shape entirely, the same way this fixture did
+  before the gap was added.
+- **Swimlanes are detected as dividers only — no lane *membership* is
+  computed.** A `swimlane` region reports its own position and
+  orientation, not which nodes fall in which lane; assigning nodes to
+  lanes by which side of a divider they fall on is a real, useful
+  extension that isn't built. Swimlane labels (e.g., a lane's header text)
+  are also not OCR'd — only the divider line itself is detected.
+- **The solid-vs-hollow interior check can misread a *thin hollow* shape
+  as solid.** `_mean_interior_intensity` erodes a contour's filled mask
+  inward by a fixed `SOLID_FILL_ERODE_PX` (5px) before sampling — for an
+  ordinarily-sized shape this safely skips past its own outline stroke,
+  but for a shape thin enough in one dimension that erosion consumes the
+  entire mask, the code falls back to sampling the *un-eroded* mask, which
+  includes the stroke itself and can read as solid even for a genuinely
+  hollow shape. Not observed on any current fixture (this adapter's own
+  fork/join bars are drawn solid, not as a thin hollow outline), but it's
+  a real gap in a shape thinner than roughly `2 * SOLID_FILL_ERODE_PX`
+  wide in its short dimension — flagged because it's untested, not because
+  a failure has been seen.
+- **The `ocr-engine-available` check and the lazy OCR-probe both correctly
+  exclude `node-initial`/`node-final`/`fork-join` nodes from "labels that
+  need OCR"** (fixed during review, before either ever shipped as a
+  measured claim): a diagram made of only these shapes plus edges would
+  otherwise have forced an EasyOCR model load for nothing, and an
+  OCR-unavailable diagram containing these shapes would have overstated
+  how many labels actually went unread. Edges are unaffected — this
+  adapter always attempts to OCR an edge's label if the engine is
+  available, regardless of shape.
 
 ## Test fixtures
 
@@ -428,3 +573,16 @@ structurally different diagram grammar than any prior fixture. This is
 what surfaced both bugs described in "Fixed bugs" above; see
 `tests/test_diagram_sequence_shape.py` for the regression tests built from
 it.
+
+`tests/fixtures/generate_diagram_fixture_activity.py` builds
+`tests/fixtures/activity_diagram_clean.png`: a UML *activity* diagram (a
+third, structurally different diagram grammar) — initial node → rounded
+activity box → fork bar → two parallel activity boxes → join bar →
+another activity box → bullseye final node, plus one vertical swimlane
+divider. Generously spaced vertically on purpose: an early, more tightly
+packed draft caused node-masking (padding around each node before Hough
+edge detection) to eat almost the entire visible length of several short
+connectors, so Hough silently found no line to detect there at all — see
+`tests/test_diagram_activity_shapes.py` for the regression tests built
+from this fixture, and the "UML activity-diagram shapes" section above for
+what each new shape's detection actually relies on.

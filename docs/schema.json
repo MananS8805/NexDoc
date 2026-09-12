@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://internal/semantic-preprocessing-pipeline/artifact.schema.json",
-  "title": "Semantic Preprocessing Pipeline — common artifact schema",
+  "title": "nexDoc — common artifact schema",
   "description": "The one schema every adapter converges on (see /CLAUDE.md, 'Common schema'). This is what proves reusability is real: adding a new artifact type means writing an adapter that produces this exact shape, not inventing a new one. Validated in practice by tests/test_schema_conformance.py against real output from all three adapters (spreadsheet, document, diagram) — not just written to look plausible.",
   "type": "object",
   "required": ["artifact", "kind", "adapter", "source", "regions", "checks"],

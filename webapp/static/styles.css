@@ -282,8 +282,32 @@ table.recon-grid td.cell-empty{ background:var(--surface); }
 .preview-page-label{
   position:absolute; left:var(--space-2); font-family:var(--font-mono); font-size:10px;
   color:var(--ink-faint); background:rgba(251,251,248,0.85); padding:1px 6px; border-radius:999px;
-  pointer-events:none;
+  pointer-events:none; z-index:2;
 }
+
+/* Multi-page documents: each page gets its own block at its own real
+   aspect ratio (set inline via style.aspectRatio, per page), stacked in a
+   normal scrolling flow — not squeezed into one fixed-ratio frame via
+   object-fit:contain, which (verified directly on a real 2-page fixture)
+   renders each page as a narrow, off-center column while the region
+   overlay boxes still assumed the image filled the frame edge-to-edge,
+   visibly disconnecting every box from the real page content. */
+.page-frame.multi-page{
+  aspect-ratio:auto; overflow:visible; background:none; border:none; box-shadow:none;
+  display:flex; flex-direction:column; gap:var(--space-4);
+  max-height:640px; overflow-y:auto; padding-right:6px;
+}
+.page-block{
+  position:relative; width:100%; flex:none;
+  border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+  background:var(--surface); box-shadow:0 10px 26px -18px rgba(16,30,25,0.45); overflow:hidden;
+}
+.page-block img{ display:block; width:100%; height:auto; pointer-events:none; }
+
+/* Single-image case (a diagram, or a one-page document) can still grow
+   tall on an unusually long/narrow source image — scrollable rather than
+   however large the aspect-ratio box happens to compute to. */
+.page-frame{ max-height:640px; overflow-y:auto; }
 
 .region{
   position:absolute; border:1.5px solid var(--line-strong); border-radius:3px;
@@ -302,6 +326,11 @@ table.recon-grid td.cell-empty{ background:var(--surface); }
 .region.shape-node{ border-radius:999px; }
 .region.shape-node-decision{ border-radius:6px; border-style:dashed; }
 .region.shape-node-circle{ border-radius:50%; }
+.region.shape-node-initial{ border-radius:50%; }
+.region.shape-node-final{ border-radius:50%; border-width:2px; }
+.region.shape-fork-join{ border-radius:2px; border-width:2px; }
+.region.shape-node-activity{ border-radius:14px; }
+.region.shape-swimlane-divider{ border-style:dashed; background:transparent; }
 .region.shape-edge{ background:rgba(251,251,248,0.6); border-style:dashed; }
 .page-frame:has(.preview-image) .region.shape-edge{ background:transparent; }
 .region.shape-edge .region-label{ font-style:italic; }

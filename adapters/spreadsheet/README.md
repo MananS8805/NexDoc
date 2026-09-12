@@ -1,6 +1,6 @@
 # Spreadsheet adapter
 
-Phase 1 of the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
+Phase 1 of nexDoc, the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
 `.xlsx` workbook into the common node/edge schema without flattening
 formulas to values first.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""CLI entry point for the semantic preprocessing pipeline.
+"""CLI entry point for nexDoc, the semantic preprocessing pipeline.
 
     python run_adapter.py --input <path-to-any-file> --output-dir <dir> [--eval-questions <path>]
 

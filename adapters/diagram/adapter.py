@@ -26,6 +26,13 @@ edges are axis-aligned (rectangle) or diagonal (diamond/decision) comes
 from the actual angle of each edge relative to horizontal — a real
 geometric signal, not a guess.
 
+UML activity-diagram shapes (initial/final nodes, fork/join bars, rounded
+activity boxes, swimlanes) are detected via the same contour geometry plus
+one new signal fill_ratio alone can't provide: how dark a shape's own
+interior is in the source binary image, which tells a solid-filled glyph
+apart from a hollow outline of the identical silhouette. See README's "How
+detection actually works" for the full breakdown.
+
 Edge detection: node bounding boxes are masked out of the binary image
 first, so cv2.HoughLinesP only sees connector strokes, never a node's own
 border. Each retained line segment is matched to the two nearest nodes by
@@ -121,6 +128,38 @@ NODE_DEDUP_IOU_THRESHOLD = 0.5  # bbox overlap above this -> same physical shape
 ELLIPSE_LABEL_INSET_X_FRAC = 0.22
 ELLIPSE_LABEL_INSET_Y_FRAC = 0.30
 
+# --- UML activity-diagram shapes -------------------------------------------
+# A hollow ring and a solid-filled circle of the *same outer boundary* have
+# an IDENTICAL fill_ratio (contour area / bbox area) -- fill_ratio can only
+# describe the outer edge, not what's inside it, so it cannot tell an
+# initial-node dot, a final-node bullseye, or a fork/join bar apart from an
+# ordinary hollow shape of the same silhouette. The one signal that can is
+# how dark the shape's own INTERIOR is in the source binary image, sampled
+# after eroding a few pixels in from the contour boundary so a hollow
+# shape's own outline stroke isn't mistaken for solid fill.
+SOLID_FILL_MEAN_THRESHOLD = 127.0  # mean binary-image intensity (0-255) inside a contour's eroded interior; at/above this the shape is solid-filled, below it's a hollow outline
+SOLID_FILL_ERODE_PX = 5  # shrinks the sampled interior mask inward by this many pixels so a hollow shape's stroke doesn't skew the mean toward "solid"
+
+# A UML initial node is a small solid dot, and a final node's inner dot is
+# the same size marker nested inside a larger hollow ring -- both
+# categorically smaller than a real activity/decision shape in the same
+# diagram. This is a fixed-scale heuristic (like the diagram's other size
+# constants), tuned to this adapter's fixture scale (~700-900px canvases);
+# see README's "Known limitations" for the honest scaling caveat.
+ACTIVITY_MARKER_MAX_AREA = 1500  # px^2 -- ceiling for "this round solid shape is a small initial/final-node dot," not a large filled circle icon
+FINAL_NODE_INNER_MAX_AREA_FRACTION = 0.5  # a candidate inner dot must be smaller than this fraction of its surrounding ring's area to count as nested, not a second same-size shape
+
+ROUNDED_RECT_FILL_RATIO_MIN = 0.85  # a rounded rectangle's corners cut only a small area from its bounding box, so it still nearly fills it, like a sharp-cornered rectangle
+ROUNDED_RECT_CONFIDENCE = 0.90  # below a crisp 4-vertex rectangle's ceiling (0.97): tolerating >4 vertices for rounding is a softer geometric match
+
+FORK_JOIN_MIN_ASPECT_RATIO = 4.0  # width:height or height:width -- a fork/join bar is a thin, heavily elongated solid rectangle, unlike a normal activity box
+FORK_JOIN_CONFIDENCE = 0.94
+
+SWIMLANE_MIN_LENGTH_FRAC = 0.55  # a long straight segment spanning at least this fraction of the image's width or height is treated as a swimlane divider, not a connector
+SWIMLANE_HOUGH_MIN_LINE_LENGTH_FRAC = 0.35  # separate, longer minLineLength than connector detection uses, so short connector strokes never get picked up by this pass
+SWIMLANE_AXIS_TOLERANCE_DEG = 3  # how far from purely horizontal/vertical a long segment can be and still count as a lane divider (a hand-steady straight line, not a diagonal connector)
+SWIMLANE_DEDUP_DIST_PX = 20  # near-parallel, near-collinear long segments within this distance are the same physical divider line
+
 
 def _load_binary(path: str | Path) -> np.ndarray:
     img = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
@@ -192,6 +231,36 @@ def _ellipse_confidence(mean_fit_error: float) -> float:
     return round(0.95 - 0.20 * frac, 4)
 
 
+def _mean_interior_intensity(binary: np.ndarray, contour: np.ndarray) -> float:
+    """Mean binary-image value strictly inside a contour, after eroding the
+    filled mask inward by SOLID_FILL_ERODE_PX -- the one real signal that
+    distinguishes a solid-filled shape from a hollow outline of the exact
+    same silhouette, which fill_ratio (area / bbox area) cannot: both read
+    identically from the outer boundary alone. A solid shape's interior
+    stays foreground (255) after erosion; a hollow shape's interior is
+    background (0) once the erosion has eaten past its own outline stroke.
+    """
+    mask = np.zeros(binary.shape, dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
+    kernel = np.ones((SOLID_FILL_ERODE_PX, SOLID_FILL_ERODE_PX), np.uint8)
+    eroded = cv2.erode(mask, kernel)
+    sample_mask = eroded if cv2.countNonZero(eroded) > 0 else mask
+    return float(cv2.mean(binary, mask=sample_mask)[0])
+
+
+def _is_axis_aligned_rect_contour(contour: np.ndarray) -> bool:
+    """Whether a contour's minimum-area bounding rectangle is axis-aligned,
+    via the same real edge-angle test _is_axis_aligned already uses for a
+    clean 4-vertex polygon -- reused here on cv2.minAreaRect's synthetic
+    4-corner box instead of the raw contour, so a >4-vertex contour (e.g. a
+    rounded rectangle's rounded corners) can still be tested for axis
+    alignment without depending on OpenCV's minAreaRect angle convention,
+    which has changed across versions.
+    """
+    box = cv2.boxPoints(cv2.minAreaRect(contour))
+    return _is_axis_aligned(_edge_angles_deg(box))
+
+
 def _bbox_iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     ax0, ay0, ax1, ay1 = a
     bx0, by0, bx1, by1 = b
@@ -237,8 +306,17 @@ def _dedup_nodes(nodes: list[dict]) -> list[dict]:
     # Area still breaks ties within the same shape category — that's the
     # genuine ring-duplicate case (two node-circle candidates for one real
     # circle), unaffected by this change.
+    # node-initial/node-final are round-family shapes too (a duplicate
+    # hole-boundary contour of a UML marker can be misclassified as
+    # node-initial by the solid-fill heuristic, exactly the same failure
+    # mode as an ordinary ring's duplicate contour above) -- grouping them
+    # with node-circle here ensures such a duplicate still loses to its
+    # larger, more-accurate sibling rather than surviving as a phantom
+    # extra node just because its shape label differs.
+    _ROUND_FAMILY_SHAPES = {"node-circle", "node-initial", "node-final"}
+
     def _dedup_sort_key(n: dict) -> tuple[bool, float]:
-        return (n["shape"] == "node-circle", -n["area"])
+        return (n["shape"] in _ROUND_FAMILY_SHAPES, -n["area"])
 
     kept: list[dict] = []
     for cand in sorted(nodes, key=_dedup_sort_key):
@@ -246,6 +324,50 @@ def _dedup_nodes(nodes: list[dict]) -> list[dict]:
             continue
         kept.append(cand)
     return kept
+
+
+def _bbox_center(bbox: tuple[int, int, int, int]) -> tuple[float, float]:
+    x0, y0, x1, y1 = bbox
+    return (x0 + x1) / 2, (y0 + y1) / 2
+
+
+def _merge_final_node_bullseyes(nodes: list[dict]) -> list[dict]:
+    """A UML activity final (end) node is drawn as a bullseye: a hollow ring
+    (already detected as node-circle) with a small solid dot concentric
+    inside it (already detected as node-initial, since a lone dot looks
+    identical to an initial node until you know it's nested). Real
+    containment -- the dot's center sits inside the ring's bbox and its area
+    is meaningfully smaller -- is the only thing that tells the two apart;
+    an initial node that happens to share an image with an unrelated ring
+    elsewhere would not pass this (their bboxes wouldn't overlap).
+    """
+    rings = [n for n in nodes if n["shape"] == "node-circle" and not n.get("solid", False)]
+    dots = [n for n in nodes if n["shape"] == "node-initial"]
+    consumed_dot_ids = set()
+
+    for ring in rings:
+        rx0, ry0, rx1, ry1 = ring["bbox"]
+        best_dot = None
+        for dot in dots:
+            if id(dot) in consumed_dot_ids:
+                continue
+            if dot["area"] >= FINAL_NODE_INNER_MAX_AREA_FRACTION * ring["area"]:
+                continue
+            dcx, dcy = _bbox_center(dot["bbox"])
+            if not (rx0 <= dcx <= rx1 and ry0 <= dcy <= ry1):
+                continue
+            if best_dot is None or dot["area"] > best_dot["area"]:
+                best_dot = dot
+        if best_dot is not None:
+            ring["shape"] = "node-final"
+            # Same reasoning as node-initial's own exemption: the nested
+            # ring+dot containment check just confirmed is a stronger,
+            # purpose-built signal than the generic MIN_NODE_AREA floor
+            # (tuned for flowchart boxes) is meant to police.
+            ring["below_primary_threshold"] = False
+            consumed_dot_ids.add(id(best_dot))
+
+    return [n for n in nodes if id(n) not in consumed_dot_ids]
 
 
 def _detect_nodes(binary: np.ndarray) -> list[dict]:
@@ -278,12 +400,23 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
         if len(approx) == 4:
             angles = _edge_angles_deg(approx)
             axis_aligned = _is_axis_aligned(angles)
+            aspect_ratio = max(w, h) / max(1, min(w, h))
             # A rectangle's contour area should nearly fill its bounding box; a
             # diamond's fills roughly half of it (its bbox corners are outside
             # the shape). Both are real, distinct, measurable signals.
             if axis_aligned and fill_ratio > 0.85:
-                shape = "node"
-                confidence = 0.97 if fill_ratio > 0.93 else 0.90
+                is_solid = _mean_interior_intensity(binary, contour) >= SOLID_FILL_MEAN_THRESHOLD
+                if is_solid and aspect_ratio >= FORK_JOIN_MIN_ASPECT_RATIO:
+                    # A UML fork/join bar: solid black, heavily elongated,
+                    # axis-aligned. Direction (fork vs. join) isn't a shape
+                    # property -- it depends on which side has more incoming
+                    # vs. outgoing edges, which this adapter doesn't
+                    # distinguish; see README's "Known limitations".
+                    shape = "fork-join"
+                    confidence = FORK_JOIN_CONFIDENCE
+                else:
+                    shape = "node"
+                    confidence = 0.97 if fill_ratio > 0.93 else 0.90
             elif not axis_aligned and 0.35 < fill_ratio < 0.65:
                 shape = "node-decision"
                 confidence = 0.93 if 0.45 < fill_ratio < 0.55 else 0.85
@@ -304,28 +437,74 @@ def _detect_nodes(binary: np.ndarray) -> list[dict]:
             )
             continue
 
-        # Not a clean 4-vertex polygon — before giving up (the prior
-        # behavior for every non-quadrilateral contour), check whether it's
-        # a circle/ellipse. Gated on both the fill-ratio pre-filter and a
+        # Not a clean 4-vertex polygon. First check whether it's a real
+        # circle/ellipse (a tight fitEllipse fit is a stronger, more
+        # reliable signal than fill_ratio band membership alone -- a rounded
+        # rectangle can land in the same fill-ratio band but fits an ellipse
+        # poorly at its flatter sides, which is exactly what disambiguates
+        # the two below). Gated on both the fill-ratio pre-filter and a
         # minimum point count so fitEllipse isn't run on tiny/degenerate
         # contours.
+        classified = False
         if len(contour) >= ELLIPSE_MIN_CONTOUR_POINTS and ELLIPSE_FILL_RATIO_MIN <= fill_ratio <= ELLIPSE_FILL_RATIO_MAX:
             ellipse = cv2.fitEllipse(contour)
             fit_error = _ellipse_fit_error(contour, ellipse)
             if fit_error <= ELLIPSE_FIT_ERROR_MAX:
-                confidence = _ellipse_confidence(fit_error)
+                is_solid = _mean_interior_intensity(binary, contour) >= SOLID_FILL_MEAN_THRESHOLD
+                # A solid, small round shape is a UML initial-node dot (or,
+                # if it later turns out to sit inside a larger hollow ring,
+                # a final node's inner dot -- resolved in the merge pass
+                # below, after every candidate in the image is known).
+                if is_solid and area <= ACTIVITY_MARKER_MAX_AREA:
+                    shape = "node-initial"
+                    confidence = _ellipse_confidence(fit_error)
+                else:
+                    shape = "node-circle"
+                    confidence = _ellipse_confidence(fit_error)
+                # node-initial deliberately skips the MIN_NODE_AREA gate
+                # below: its own solid-fill + ellipse-fit signal is a
+                # purpose-built confirmation for "this is a real small
+                # marker," a stronger claim than the generic area floor
+                # (tuned for flowchart boxes, not deliberately tiny UML
+                # glyphs) is meant to police.
                 nodes.append(
                     {
                         "bbox": (x, y, x + w, y + h),
-                        "shape": "node-circle",
+                        "shape": shape,
                         "confidence": confidence,
                         "area": area,
-                        "below_primary_threshold": area < MIN_NODE_AREA,
+                        "solid": is_solid,
+                        "below_primary_threshold": False if shape == "node-initial" else area < MIN_NODE_AREA,
                     }
                 )
-        # else: neither rectangle, diamond, nor circle/ellipse — honestly
-        # missed, same as any other unrecognized shape (see README's "Known
-        # limitations").
+                classified = True
+
+        # Still not classified: check for a rounded-rectangle activity node
+        # -- a UML activity box's corners add extra approxPolyDP vertices
+        # (so it never matches the 4-vertex branch above) without changing
+        # how much of its own bounding box it fills, unlike a diamond.
+        if not classified and fill_ratio > ROUNDED_RECT_FILL_RATIO_MIN and _is_axis_aligned_rect_contour(contour):
+            nodes.append(
+                {
+                    "bbox": (x, y, x + w, y + h),
+                    "shape": "node-activity",
+                    "confidence": ROUNDED_RECT_CONFIDENCE,
+                    "area": area,
+                    "solid": False,
+                    "below_primary_threshold": area < MIN_NODE_AREA,
+                }
+            )
+            classified = True
+
+        # else: neither rectangle, diamond, circle/ellipse, nor rounded
+        # rectangle — honestly missed, same as any other unrecognized shape
+        # (see README's "Known limitations").
+
+    # Resolve bullseye final nodes (ring + nested solid dot) before the
+    # relative-rescue pass below, which reasons about "confirmed" node areas
+    # -- a dot that's about to be absorbed into its ring shouldn't count as
+    # its own separate small candidate.
+    nodes = _merge_final_node_bullseyes(nodes)
 
     # Relative rescue: a candidate below MIN_NODE_AREA is kept only if it's
     # a real fraction of the size of shapes this same image already
@@ -471,11 +650,80 @@ def _detect_edges(binary_full: np.ndarray, binary_masked: np.ndarray, nodes: lis
     return edges
 
 
+def _detect_swimlanes(binary: np.ndarray) -> list[dict]:
+    """UML swimlanes are drawn as long straight dividers spanning most of
+    the canvas -- a fundamentally different real signal from a connector
+    (which runs between two specific nodes and is comparatively short) or a
+    node's own border (which is masked out for edge detection, but a
+    swimlane divider legitimately runs behind/through nodes, so this scans
+    the full, unmasked binary image rather than the connector-masked one).
+    Uses its own, much longer minLineLength than connector detection so a
+    normal-length connector stroke can never be mistaken for a lane
+    divider.
+    """
+    h, w = binary.shape
+    min_line_length = int(SWIMLANE_HOUGH_MIN_LINE_LENGTH_FRAC * min(h, w))
+    lines = cv2.HoughLinesP(
+        binary,
+        rho=1,
+        theta=np.pi / 180,
+        threshold=50,
+        minLineLength=min_line_length,
+        maxLineGap=10,
+    )
+    if lines is None:
+        return []
+
+    segments = [tuple(int(v) for v in np.asarray(l).reshape(-1)) for l in lines]
+    candidates = []
+    for x1, y1, x2, y2 in segments:
+        length = math.hypot(x2 - x1, y2 - y1)
+        angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1))) % 180
+        is_horizontal = angle <= SWIMLANE_AXIS_TOLERANCE_DEG or angle >= 180 - SWIMLANE_AXIS_TOLERANCE_DEG
+        is_vertical = abs(angle - 90) <= SWIMLANE_AXIS_TOLERANCE_DEG
+        if is_horizontal and length >= SWIMLANE_MIN_LENGTH_FRAC * w:
+            orientation = "horizontal"
+        elif is_vertical and length >= SWIMLANE_MIN_LENGTH_FRAC * h:
+            orientation = "vertical"
+        else:
+            continue
+        length_frac = length / w if orientation == "horizontal" else length / h
+        candidates.append(
+            {
+                "bbox": (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
+                "orientation": orientation,
+                "length": length,
+                "confidence": round(min(0.95, 0.5 + 0.45 * min(length_frac, 1.0)), 4),
+            }
+        )
+
+    # Hough commonly returns several near-duplicate detections for one real
+    # thick line; collapse same-orientation candidates whose midpoints sit
+    # within SWIMLANE_DEDUP_DIST_PX of each other, keeping the longest.
+    candidates.sort(key=lambda c: -c["length"])
+    kept: list[dict] = []
+    for cand in candidates:
+        cx, cy = _bbox_center(cand["bbox"])
+        if any(
+            k["orientation"] == cand["orientation"] and math.hypot(cx - _bbox_center(k["bbox"])[0], cy - _bbox_center(k["bbox"])[1]) < SWIMLANE_DEDUP_DIST_PX
+            for k in kept
+        ):
+            continue
+        kept.append(cand)
+
+    kept.sort(key=lambda c: (c["bbox"][1], c["bbox"][0]))
+    return kept
+
+
 def _ellipse_label_bbox(bbox: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
     x0, y0, x1, y1 = bbox
     w, h = x1 - x0, y1 - y0
     inset_x, inset_y = int(w * ELLIPSE_LABEL_INSET_X_FRAC), int(h * ELLIPSE_LABEL_INSET_Y_FRAC)
     return (x0 + inset_x, y0 + inset_y, x1 - inset_x, y1 - inset_y)
+
+
+_NO_LABEL_SHAPES = frozenset({"node-initial", "node-final", "fork-join"})
+_ELLIPSE_LABEL_SHAPES = frozenset({"node-circle"})
 
 
 def _iter_regions(path: str | Path) -> Iterator[Region]:
@@ -484,19 +732,31 @@ def _iter_regions(path: str | Path) -> Iterator[Region]:
     nodes = _detect_nodes(binary)
     masked = _mask_out_nodes(binary, nodes)
     edges = _detect_edges(binary, masked, nodes)
+    swimlanes = _detect_swimlanes(binary)
 
     # Probed lazily, only if there's at least one node/edge that could carry
     # a label — same reasoning as the document adapter's _iter_regions:
     # ocr_engine_status() loads EasyOCR's model weights (real, multi-second
     # work), which an image with nothing to label shouldn't have to pay for.
-    ocr_ok = ocr_engine_status()[0] if (nodes or edges) else False
+    # Swimlanes never carry a label in this adapter (see README's "Known
+    # limitations"), so they don't factor into this probe -- and neither do
+    # node-initial/node-final/fork-join nodes, which never get an OCR
+    # attempt either (see _NO_LABEL_SHAPES below): a diagram made up
+    # entirely of those plus no edges has nothing this adapter would ever
+    # try to read, so it shouldn't pay for the model load at all.
+    has_labelable_node = any(n["shape"] not in _NO_LABEL_SHAPES for n in nodes)
+    ocr_ok = ocr_engine_status()[0] if (has_labelable_node or edges) else False
     node_ids = []
     for i, node in enumerate(nodes):
         region_id = f"node-{i + 1}"
         node_ids.append(region_id)
         text, ocr_conf = (None, 0.0)
-        if ocr_ok:
-            ocr_bbox = _ellipse_label_bbox(node["bbox"]) if node["shape"] == "node-circle" else node["bbox"]
+        # node-initial/node-final/fork-join are pure UML glyphs with no
+        # label of their own by convention -- skipping OCR for them isn't
+        # a missed case, it's the correct, honest behavior for a shape
+        # that was never going to have readable text inside it.
+        if ocr_ok and node["shape"] not in _NO_LABEL_SHAPES:
+            ocr_bbox = _ellipse_label_bbox(node["bbox"]) if node["shape"] in _ELLIPSE_LABEL_SHAPES else node["bbox"]
             text, ocr_conf = read_label(image_bgr, ocr_bbox)
         yield Region(
             id=region_id,
@@ -504,6 +764,15 @@ def _iter_regions(path: str | Path) -> Iterator[Region]:
             shape=node["shape"],
             confidence=node["confidence"],
             text=text,
+        )
+
+    for i, lane in enumerate(swimlanes):
+        yield Region(
+            id=f"swimlane-{i + 1}",
+            type="swimlane",
+            shape="swimlane-divider",
+            confidence=lane["confidence"],
+            text=None,
         )
 
     for i, edge in enumerate(edges):
@@ -553,7 +822,14 @@ def _check_edges_reference_existing_nodes(regions: list[Region]) -> Check:
 
 
 def _check_ocr_engine_available(regions: list[Region]) -> Check:
-    label_bearing = [r for r in regions if r.type in ("node", "edge")]
+    # node-initial/node-final/fork-join are excluded here even though
+    # they're type "node" -- OCR is never attempted for them (see
+    # _NO_LABEL_SHAPES), so counting them as "could not be OCR'd" when the
+    # engine is unavailable would overstate the real impact: none of these
+    # shapes would have gotten a label either way.
+    label_bearing = [
+        r for r in regions if r.type == "edge" or (r.type == "node" and r.shape not in _NO_LABEL_SHAPES)
+    ]
     if not label_bearing:
         # No nodes/edges at all means _iter_regions never probed the OCR
         # engine either (see its lazy-probe comment) — don't force an

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Semantic preprocessing pipeline — interactive mock</title>
+<title>nexDoc — interactive mock</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -236,7 +236,7 @@
   <div class="wrap">
     <div class="mark">
       <span class="mark-glyph" aria-hidden="true"></span>
-      <span class="mark-name">docpipe</span>
+      <span class="mark-name">nexDoc</span>
     </div>
     <nav class="site-nav" aria-label="Section links">
       <a href="#accepts">What it accepts</a>
@@ -2674,6 +2674,9 @@ function renderPreview(runScan){
     frame.appendChild(svg);
   }
 
+  const pageNumbers = doc.regions.filter(r => r.box && r.box.page).map(r => r.box.page);
+  const numPages = pageNumbers.length ? Math.max.apply(null, pageNumbers) : 1;
+  const pageBand = 100 / numPages;
   doc.regions.forEach(r => {
     const el = document.createElement('div');
     let cls = 'region';
@@ -2681,10 +2684,16 @@ function renderPreview(runScan){
     if(r.id === activeRegionId) cls += ' active';
     if(r.shape) cls += ' shape-' + r.shape;
     el.className = cls;
-    el.style.top = r.box.top + '%';
-    el.style.left = r.box.left + '%';
-    el.style.width = r.box.width + '%';
-    el.style.height = r.box.height + '%';
+    const box = (numPages > 1 && r.box.page) ? {
+      top: (r.box.page - 1) * pageBand + (r.box.top / 100) * pageBand,
+      left: r.box.left,
+      width: r.box.width,
+      height: (r.box.height / 100) * pageBand,
+    } : r.box;
+    el.style.top = box.top + '%';
+    el.style.left = box.left + '%';
+    el.style.width = box.width + '%';
+    el.style.height = box.height + '%';
     el.title = r.typeLabel;
     el.setAttribute('role', 'button');
     el.setAttribute('tabindex', '0');

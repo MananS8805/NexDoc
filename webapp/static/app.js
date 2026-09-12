@@ -176,9 +176,34 @@ function renderChecks(){
     }).join('');
 }
 
+function buildRegionEl(r){
+  const el = document.createElement('div');
+  let cls = 'region';
+  if(r.confidence < 0.85) cls += ' low';
+  if(r.id === activeRegionId) cls += ' active';
+  if(r.shape) cls += ' shape-' + r.shape;
+  el.className = cls;
+  el.style.top = r.box.top + '%';
+  el.style.left = r.box.left + '%';
+  el.style.width = r.box.width + '%';
+  el.style.height = r.box.height + '%';
+  el.title = r.typeLabel;
+  el.setAttribute('role', 'button');
+  el.setAttribute('tabindex', '0');
+  el.setAttribute('aria-label', r.typeLabel + (r.text ? ': ' + r.text : ' (non-text region)'));
+  const tag = document.createElement('span');
+  tag.className = 'region-label';
+  tag.textContent = r.typeLabel;
+  el.appendChild(tag);
+  el.addEventListener('click', () => selectRegion(r.id));
+  el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectRegion(r.id); } });
+  return el;
+}
+
 function renderPreview(runScan){
   const frame = document.getElementById('pageFrame');
-  frame.querySelectorAll('.region, .preview-image, .preview-page-label').forEach(el => el.remove());
+  frame.querySelectorAll('.region, .preview-image, .preview-page-label, .page-block').forEach(el => el.remove());
+  frame.classList.remove('multi-page');
 
   // Real pixels from the file the user actually uploaded (doc.previewImages
   // — one entry for a diagram, one per page for a document), not just the
@@ -191,69 +216,91 @@ function renderPreview(runScan){
 
   const sub = document.getElementById('previewSub');
   if(hasImages){
-    sub.textContent = '— the actual uploaded file, with detected regions overlaid';
+    sub.textContent = images.length > 1
+      ? '— the actual uploaded file, with detected regions overlaid (scroll for more pages)'
+      : '— the actual uploaded file, with detected regions overlaid';
   } else if(doc.kind === 'spreadsheet'){
     sub.textContent = '— cell grid reconstructed from parsed values (no bitmap original to preview)';
   } else {
     sub.textContent = '— region boxes by type/confidence (no image preview available for this file)';
   }
 
-  // A single image (a diagram, or a one-page document) gets the frame's own
-  // aspect ratio so it isn't squished into the fixed portrait default.
-  // Multiple document pages keep that fixed frame and stack inside it by
-  // percentage — the exact layout doc.regions[].box already assumes for a
-  // multi-page document (each page gets an equal vertical band; see
-  // scripts/build_prototype.py's _compute_boxes_document), so page images
-  // are placed at the same per-page band their regions' boxes already use,
-  // not independently sized — otherwise a region's overlay box would land
-  // on the wrong page's image.
-  frame.style.aspectRatio = (images.length === 1) ? (images[0].width + ' / ' + images[0].height) : '';
-
-  const bandHeight = hasImages ? 100 / images.length : 0;
-  images.forEach((img, i) => {
-    const imgEl = document.createElement('img');
-    imgEl.className = 'preview-image';
-    imgEl.src = img.dataUrl;
-    imgEl.alt = img.pageLabel || 'Uploaded file preview';
-    imgEl.style.top = (i * bandHeight) + '%';
-    imgEl.style.height = bandHeight + '%';
-    frame.appendChild(imgEl);
-    if(img.pageLabel && images.length > 1){
-      const label = document.createElement('div');
-      label.className = 'preview-page-label';
-      label.style.top = (i * bandHeight) + '%';
-      label.textContent = img.pageLabel;
-      frame.appendChild(label);
-    }
-  });
-
   const noPreview = document.getElementById('noPreview');
   const hasBoxes = doc.regions.some(r => r.box);
   noPreview.hidden = hasImages || hasBoxes;
 
+  if(hasImages && images.length > 1){
+    // Multi-page: each page is its own block at its OWN real aspect ratio,
+    // stacked in a scrolling column — not squeezed into one fixed-ratio
+    // frame via object-fit:contain, which (verified on a real 2-page
+    // fixture) renders each page as a narrow off-center column while the
+    // overlay boxes assumed the image filled the frame edge-to-edge,
+    // visibly disconnecting every box from the real page content. Each
+    // region's box.top/left/width/height is already LOCAL to its own page
+    // (scripts/build_prototype.py's _compute_boxes_document) and box.page
+    // says which page block it belongs in.
+    frame.classList.add('multi-page');
+    frame.style.aspectRatio = '';
+    images.forEach((img, i) => {
+      const pageNum = i + 1;
+      const block = document.createElement('div');
+      block.className = 'page-block';
+      block.style.aspectRatio = img.width + ' / ' + img.height;
+      const imgEl = document.createElement('img');
+      imgEl.src = img.dataUrl;
+      imgEl.alt = img.pageLabel || ('Page ' + pageNum);
+      block.appendChild(imgEl);
+      if(img.pageLabel){
+        const label = document.createElement('div');
+        label.className = 'preview-page-label';
+        label.style.top = '6px';
+        label.textContent = img.pageLabel;
+        block.appendChild(label);
+      }
+      doc.regions
+        .filter(r => r.box && (r.box.page || 1) === pageNum)
+        .forEach(r => block.appendChild(buildRegionEl(r)));
+      frame.appendChild(block);
+    });
+    return; // no scanline for the multi-page layout — it doesn't map to N independent blocks
+  }
+
+  // Single image (a diagram, or a one-page document) gets the frame's own
+  // aspect ratio so it isn't squished into the fixed portrait default; a
+  // spreadsheet (no image) keeps that fixed default with the grid-bg above.
+  if(hasImages){
+    frame.style.aspectRatio = images[0].width + ' / ' + images[0].height;
+    const imgEl = document.createElement('img');
+    imgEl.className = 'preview-image';
+    imgEl.src = images[0].dataUrl;
+    imgEl.alt = images[0].pageLabel || 'Uploaded file preview';
+    frame.appendChild(imgEl);
+  } else {
+    frame.style.aspectRatio = '';
+  }
+
+  // Abstract-only fallback for a multi-page document with no real images at
+  // all (e.g. server-side preview rendering failed but analysis otherwise
+  // succeeded — see webapp/main.py's _build_preview_images try/except).
+  // Region boxes are LOCAL to their own page (box.page), so without a
+  // per-page image to anchor each one to, they're converted here into a
+  // global stacked percentage across one shared frame — otherwise every
+  // page's regions would render at the same local coordinates on top of
+  // each other, the exact overlap this whole rework exists to avoid.
+  const pageNumbers = doc.regions.filter(r => r.box && r.box.page).map(r => r.box.page);
+  const numPages = pageNumbers.length ? Math.max(...pageNumbers) : 1;
+  const pageBand = 100 / numPages;
+
   doc.regions.forEach(r => {
     if(!r.box) return;
-    const el = document.createElement('div');
-    let cls = 'region';
-    if(r.confidence < 0.85) cls += ' low';
-    if(r.id === activeRegionId) cls += ' active';
-    if(r.shape) cls += ' shape-' + r.shape;
-    el.className = cls;
-    el.style.top = r.box.top + '%';
-    el.style.left = r.box.left + '%';
-    el.style.width = r.box.width + '%';
-    el.style.height = r.box.height + '%';
-    el.title = r.typeLabel;
-    el.setAttribute('role', 'button');
-    el.setAttribute('tabindex', '0');
-    el.setAttribute('aria-label', r.typeLabel + (r.text ? ': ' + r.text : ' (non-text region)'));
-    const tag = document.createElement('span');
-    tag.className = 'region-label';
-    tag.textContent = r.typeLabel;
-    el.appendChild(tag);
-    el.addEventListener('click', () => selectRegion(r.id));
-    el.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); selectRegion(r.id); } });
-    frame.appendChild(el);
+    const box = (!hasImages && numPages > 1)
+      ? {
+          ...r.box,
+          top: (r.box.page - 1) * pageBand + (r.box.top / 100) * pageBand,
+          height: (r.box.height / 100) * pageBand,
+        }
+      : r.box;
+    frame.appendChild(buildRegionEl({ ...r, box }));
   });
 
   if(runScan){

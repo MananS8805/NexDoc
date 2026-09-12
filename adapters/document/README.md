@@ -1,6 +1,6 @@
 # Document adapter
 
-Phase 2 of the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
+Phase 2 of nexDoc, the semantic preprocessing pipeline (see `/CLAUDE.md`). Converts a
 `.pdf` into the common node/edge schema using a hybrid extraction path:
 born-digital pages are read directly from their embedded text layer;
 scanned/image-only pages go through OCR. No LLM is involved anywhere in

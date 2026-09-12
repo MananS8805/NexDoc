@@ -94,19 +94,33 @@ def _compute_boxes_spreadsheet(regions: list[dict]) -> dict[str, dict]:
     return boxes
 
 
-def _ordinal_stack_boxes(region_ids: list[str]) -> dict[str, dict]:
+def _ordinal_stack_boxes(region_ids: list[str], page: int | None = None) -> dict[str, dict]:
     """Fallback box placement when a real per-region position isn't
     available (e.g. an OCR'd line with no stored bbox): stack regions as
     full-width horizontal bands in reading order. This is honest about what
     it is — an ordering, not a spatial layout — unlike the spreadsheet and
     diagram box functions, which place regions at their real coordinates.
+
+    `page`, when given, is attached to every returned box and the 0-100%
+    band is local to that one page — the same local-percentage convention
+    `_compute_boxes_document` uses for real per-block boxes. Without this,
+    a multi-page document's OCR'd lines (which, like real blocks, DO carry
+    their real page number in their own id — see the caller) would each
+    silently default to page 1 in the multi-page preview (every consumer
+    treats a missing `page` as 1), stacking every page's fallback regions
+    on top of page 1's alone. Callers that don't have per-region page
+    numbers to group by (or a genuinely single-page document) can omit it.
     """
     n = max(len(region_ids), 1)
     band = 100 / n
-    return {
+    boxes = {
         rid: {"top": round(i * band + band * 0.06, 2), "left": 2.0, "width": 96.0, "height": round(band * 0.82, 2)}
         for i, rid in enumerate(region_ids)
     }
+    if page is not None:
+        for box in boxes.values():
+            box["page"] = page
+    return boxes
 
 
 def _compute_boxes_document(path: Path, regions: list[dict]) -> dict[str, dict]:
@@ -117,15 +131,36 @@ def _compute_boxes_document(path: Path, regions: list[dict]) -> dict[str, dict]:
     this re-derives it purely for the preview panel, from the real file.
     OCR'd lines and unprocessed-scan regions have no stored bbox to
     re-derive this way and fall back to ordinal stacking.
+
+    Percentages are LOCAL to each page (0-100% of that one page), with a
+    `page` field naming which page — not a global stacked percentage across
+    all pages in one fixed-aspect-ratio frame, which is what this used to
+    return. That older scheme was real bug: the webapp's real-image preview
+    renders each page as its own image scaled with `object-fit:contain`, and
+    for any document with more than one page, a real page's own aspect
+    ratio essentially never matches its allotted band inside a fixed 1:1.32
+    frame — verified directly on a real 2-page fixture
+    (tests/fixtures/invoice_two_pages.pdf, both pages 595x842pt, aspect
+    0.707): a 2-page document's frame band works out to roughly a 1:0.66
+    (width:height) aspect, so `contain` renders each page as a narrow
+    column using only ~47% of the frame's width, centered — while box
+    percentages computed against the *whole frame's* width put every region
+    far to the left of where the actual visible page content ends up.
+    Local-per-page percentages sidestep this entirely: each page renders in
+    its own block at its own real aspect ratio, so there is no band/contain
+    mismatch to misalign against. See webapp/static/app.js's `renderPreview()`
+    for the multi-page rendering this feeds, and this same function's
+    "abstract-only, no real image" fallback (design/preprocessing-pipeline-mock.html's
+    JS, patched in render_html() below) for how a page count and this same
+    local data reconstructs an equivalent non-overlapping stacked view when
+    there's no real image to anchor against.
     """
     import fitz
 
     boxes: dict[str, dict] = {}
     doc = fitz.open(path)
     try:
-        num_pages = doc.page_count
-        page_band = 100 / max(num_pages, 1)
-        fallback_ids = []
+        fallback_ids: list[str] = []
         for region in regions:
             m = re.match(r"^page(\d+)!block(\d+)$", region["id"])
             if not m:
@@ -139,14 +174,31 @@ def _compute_boxes_document(path: Path, regions: list[dict]) -> dict[str, dict]:
                 fallback_ids.append(region["id"])
                 continue
             x0, y0, x1, y1 = match[:4]
-            band_top = (page_no - 1) * page_band
             boxes[region["id"]] = {
-                "top": round(band_top + (y0 / ph) * page_band, 2),
+                "top": round((y0 / ph) * 100, 2),
                 "left": round((x0 / pw) * 100, 2),
                 "width": round(((x1 - x0) / pw) * 100, 2),
-                "height": round(((y1 - y0) / ph) * page_band, 2),
+                "height": round(((y1 - y0) / ph) * 100, 2),
+                "page": page_no,
             }
-        boxes.update(_ordinal_stack_boxes(fallback_ids))
+
+        # Fallback ids (OCR'd lines, unprocessed-scan markers) have no
+        # stored bbox to re-derive, but — like block ids — they still carry
+        # their real page number in the id itself ('pageN!ocr-lineK',
+        # 'pageN!ocr-unavailable'; see adapters/document/adapter.py). Group
+        # by that page and stack each page's fallback regions within their
+        # own local 0-100% band, rather than one ordinal stack shared
+        # across every page — the latter would silently collapse onto page
+        # 1 in the multi-page preview (a missing `page` defaults to 1
+        # everywhere this is consumed).
+        by_page: dict[int, list[str]] = {}
+        no_page: list[str] = []
+        for rid in fallback_ids:
+            pm = re.match(r"^page(\d+)!", rid)
+            (by_page.setdefault(int(pm.group(1)), []) if pm else no_page).append(rid)
+        for page_no, ids in by_page.items():
+            boxes.update(_ordinal_stack_boxes(ids, page=page_no))
+        boxes.update(_ordinal_stack_boxes(no_page))
     finally:
         doc.close()
     return boxes
@@ -477,6 +529,54 @@ def render_html(docs: list[dict], eval_result: dict | None) -> str:
     )
     assert old_render_table in html, "renderTable() body not found — mock file may have changed"
     html = html.replace(old_render_table, new_render_table)
+
+    # renderPreview: this static report has no real per-page image to anchor
+    # a multi-page document's region boxes to (unlike the webapp — see
+    # ADR 0003), so it's always the "abstract boxes only" case. Since
+    # _compute_boxes_document now returns percentages LOCAL to each page
+    # (plus a `page` number) rather than a global stacked percentage — fixed
+    # because that global scheme mismatched real per-page images in the
+    # webapp — this reconstructs an equivalent non-overlapping stacked
+    # position here, purely from box.page and page count, so a multi-page
+    # document's regions don't all render at the same local coordinates on
+    # top of each other in this one shared frame.
+    old_render_preview_loop = (
+        "  doc.regions.forEach(r => {\n"
+        "    const el = document.createElement('div');\n"
+        "    let cls = 'region';\n"
+        "    if(r.confidence < 0.85) cls += ' low';\n"
+        "    if(r.id === activeRegionId) cls += ' active';\n"
+        "    if(r.shape) cls += ' shape-' + r.shape;\n"
+        "    el.className = cls;\n"
+        "    el.style.top = r.box.top + '%';\n"
+        "    el.style.left = r.box.left + '%';\n"
+        "    el.style.width = r.box.width + '%';\n"
+        "    el.style.height = r.box.height + '%';\n"
+    )
+    new_render_preview_loop = (
+        "  const pageNumbers = doc.regions.filter(r => r.box && r.box.page).map(r => r.box.page);\n"
+        "  const numPages = pageNumbers.length ? Math.max.apply(null, pageNumbers) : 1;\n"
+        "  const pageBand = 100 / numPages;\n"
+        "  doc.regions.forEach(r => {\n"
+        "    const el = document.createElement('div');\n"
+        "    let cls = 'region';\n"
+        "    if(r.confidence < 0.85) cls += ' low';\n"
+        "    if(r.id === activeRegionId) cls += ' active';\n"
+        "    if(r.shape) cls += ' shape-' + r.shape;\n"
+        "    el.className = cls;\n"
+        "    const box = (numPages > 1 && r.box.page) ? {\n"
+        "      top: (r.box.page - 1) * pageBand + (r.box.top / 100) * pageBand,\n"
+        "      left: r.box.left,\n"
+        "      width: r.box.width,\n"
+        "      height: (r.box.height / 100) * pageBand,\n"
+        "    } : r.box;\n"
+        "    el.style.top = box.top + '%';\n"
+        "    el.style.left = box.left + '%';\n"
+        "    el.style.width = box.width + '%';\n"
+        "    el.style.height = box.height + '%';\n"
+    )
+    assert old_render_preview_loop in html, "renderPreview()'s region loop not found — mock file may have changed"
+    html = html.replace(old_render_preview_loop, new_render_preview_loop)
 
     # Hook renderChecks() into the same places renderActiveTab() already
     # fires from, and append its definition to the script.

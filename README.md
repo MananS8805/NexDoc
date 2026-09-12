@@ -1,13 +1,13 @@
-# Semantic Preprocessing Pipeline
+# nexDoc
 
+**nexDoc** is a semantic preprocessing pipeline for enterprise artifacts.
 Enterprise information is rarely stored in forms AI systems can interpret
 directly. Critical knowledge sits in spreadsheets, reports, forms, and
 diagrams whose structure carries meaning — a formula's dependencies, a
 scanned form's field labels, a flowchart's connections. Generic pipelines
-flatten all of that to plain text and lose it. This project builds one
-pipeline that reads each artifact type in its own terms and converges every
-adapter's output onto the same schema, so a downstream system integrates
-once, not once per file type.
+flatten all of that to plain text and lose it. nexDoc reads each artifact
+type in its own terms and converges every adapter's output onto the same
+schema, so a downstream system integrates once, not once per file type.
 
 Full design rationale and build order: [`CLAUDE.md`](CLAUDE.md).
 
@@ -43,8 +43,38 @@ text. Details: [`adapters/document/README.md`](adapters/document/README.md#ocr-e
 
 ## Quickstart
 
+**Prerequisites**: Python 3.11+ (developed and verified on 3.13.2). No
+external services or accounts are required for the core pipeline — only
+the optional Groq-backed Q&A feature (below) needs an API key.
+
 ```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
 pip install -r requirements.txt
+```
+
+**Known environment pitfall (Windows especially)**: if more than one
+Python distribution is installed (e.g. an Anaconda install alongside a
+standalone python.org install), `pip install` and `python` can silently
+resolve to different environments than the one you activated. A broken or
+mismatched `torch` install in the *wrong* one surfaces as EasyOCR failing
+with `OSError: [WinError 1114] A dynamic link library (DLL) initialization
+routine failed ... torch\lib\c10.dll` — this is an environment problem, not
+a bug in this repo. Confirm which interpreter is actually active with
+`python -c "import sys; print(sys.executable)"` before troubleshooting
+further; shape/topology detection in the document and diagram adapters
+still works even when OCR can't load, since neither depends on `torch`.
+
+**Verify the install** by running the test suite (expect all passing;
+EasyOCR's first run downloads its models, ~285MB, and takes noticeably
+longer than subsequent runs):
+
+```bash
+python -m pytest tests/ -q
 ```
 
 Run any supported file through the pipeline — the file's real content
@@ -92,6 +122,27 @@ of eval means, and one genuinely interesting real finding from that run
 (the model partially reconstructing one blank formula result by summing
 its visible inputs itself — something the deterministic eval can't see by
 construction). Document and diagram don't have a task-accuracy eval yet.
+
+## Sample files for a demo or review
+
+Real, checked-in fixtures — not placeholders — one per artifact type (plus
+two diagram variants, since the diagram adapter now covers two distinct
+diagram grammars):
+
+| File | Type | What it shows |
+|---|---|---|
+| [`tests/fixtures/budget_test.xlsx`](tests/fixtures/budget_test.xlsx) | Spreadsheet | Two sheets, merged-cell titles, in-sheet and cross-sheet formulas (including one deliberately broken reference), formula confidence tiering |
+| [`tests/fixtures/invoice_born_digital.pdf`](tests/fixtures/invoice_born_digital.pdf) | Document | A born-digital invoice — title/field/line-item/total-field region classification, no OCR needed |
+| [`tests/fixtures/flowchart_clean.png`](tests/fixtures/flowchart_clean.png) | Diagram (flowchart) | Rectangle/diamond node + arrow detection, direction inference, OCR'd labels |
+| [`tests/fixtures/activity_diagram_clean.png`](tests/fixtures/activity_diagram_clean.png) | Diagram (UML activity) | Initial/final nodes, fork/join bars, rounded activity boxes, a swimlane divider |
+
+Run any of them through the CLI (writes a self-contained `prototype.html`
+you can open directly in a browser — see Quickstart above), or drag them
+into the local web app (below) to see the same result interactively. A
+scanned, OCR-dependent document is also available at
+[`tests/fixtures/note_scanned.pdf`](tests/fixtures/note_scanned.pdf) if
+you want to demo the OCR path specifically (includes a Hindi line, to show
+non-English script support).
 
 **Local web app**: the same pipeline, wrapped in a local-only interactive UI
 so you can drag a file in instead of typing a command:

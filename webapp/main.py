@@ -64,7 +64,7 @@ for p in (str(ROOT), str(ROOT / "scripts")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-app = FastAPI(title="Semantic preprocessing pipeline — local web app")
+app = FastAPI(title="nexDoc — local web app")
 
 
 def _error(status_code: int, message: str) -> JSONResponse:
@@ -306,7 +306,7 @@ def main() -> None:
     import uvicorn
 
     host, port = "127.0.0.1", 8000
-    print(f"\nSemantic preprocessing pipeline — local web app")
+    print(f"\nnexDoc — local web app")
     print(f"Open: http://{host}:{port}\n")
     uvicorn.run("webapp.main:app", host=host, port=port, reload=False)
 

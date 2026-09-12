@@ -1,4 +1,4 @@
-# Semantic Preprocessing Pipeline
+# nexDoc — Semantic Preprocessing Pipeline
 
 ## Problem statement
 

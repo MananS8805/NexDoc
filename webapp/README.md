@@ -39,7 +39,7 @@ python -m webapp.main
 Either way, the server prints the local URL on startup:
 
 ```
-Semantic preprocessing pipeline — local web app
+nexDoc — local web app
 Open: http://127.0.0.1:8000
 ```
 
