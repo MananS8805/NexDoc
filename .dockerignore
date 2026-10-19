@@ -1,0 +1,28 @@
+# Secrets and local state must never enter an image.
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+.claude
+.pytest_cache
+**/__pycache__
+**/*.pyc
+.venv
+out
+
+# Not needed at runtime
+deck
+hci-poster
+design
+docs
+eval
+README.md
+CLAUDE.md
+requirements.txt
+run_adapter.py
+
+# Tests are not shipped, except the sample fixtures the UI's "Try a sample" uses
+tests/*
+!tests/fixtures
+tests/fixtures/*.py

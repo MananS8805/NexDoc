@@ -7,3 +7,6 @@ out/
 # Real secrets — copy .env.example to .env locally and fill in a real
 # GROQ_API_KEY; never commit the real file.
 .env
+
+# OCR weights staged for the Docker build (large; regenerate with scripts/stage_ocr_models.py)
+docker-models/

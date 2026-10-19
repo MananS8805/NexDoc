@@ -1,0 +1,19 @@
+# Runtime dependencies for the container image (see Dockerfile). Differs from
+# requirements.txt on purpose:
+#   - opencv-python-headless, not opencv-python (no GUI libs needed in a server)
+#   - no reportlab (only used to regenerate test fixtures) or jsonschema (tests)
+#   - torch/torchvision are installed separately from PyTorch's CPU-only index
+#     in the Dockerfile; easyocr below then sees them as already satisfied
+#     instead of pulling the multi-GB default (CUDA) build.
+openpyxl>=3.1
+PyMuPDF>=1.24
+langdetect>=1.0.9
+Pillow>=10.0
+easyocr>=1.7.1
+opencv-python-headless>=4.9
+numpy>=1.26
+fastapi>=0.110
+uvicorn>=0.27
+python-multipart>=0.0.9
+groq>=0.11
+python-dotenv>=1.0

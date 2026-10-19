@@ -160,6 +160,12 @@ ideas that were measured and rejected, are in
 [`webapp/README.md`](webapp/README.md#performance--what-was-measured-what-changed-what-didnt);
 OCR engine alternatives are in [`docs/ocr-engine-options.md`](docs/ocr-engine-options.md).
 
+**Deploy it** as one container (CPU-only PyTorch, OCR models baked in, optional
+password gate, `/healthz`) — `python scripts/stage_ocr_models.py && docker build -t nexdoc .`.
+Measured speed per CPU budget, the thread-count trap that makes a container 1.4–2.7×
+slower if ignored, and what is *not* verified (no cloud deploy was run) are in
+[`docs/deployment.md`](docs/deployment.md).
+
 See [`webapp/README.md`](webapp/README.md) for what it does and doesn't add
 (no accounts, no database, no hosting — see
 [`docs/adr/0003-static-html-over-live-server.md`](docs/adr/0003-static-html-over-live-server.md)
