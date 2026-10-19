@@ -204,13 +204,14 @@ def _compute_boxes_document(path: Path, regions: list[dict]) -> dict[str, dict]:
     return boxes
 
 
-def _compute_boxes_diagram(path: Path, regions: list[dict]) -> dict[str, dict]:
-    """Real pixel bounding boxes from the same OpenCV detection the adapter
-    itself runs — re-run here purely to recover position for the preview
-    panel, matched back to each region by the sequence number in its id
-    ('node-K' / 'edge-K'), since position isn't part of the common schema.
+def compute_all_diagram_boxes(path: Path) -> dict[str, dict]:
+    """Boxes (percent of the source image) for EVERY node and edge the
+    adapter's OpenCV detection finds, keyed by the same 'node-K' / 'edge-K'
+    ids the adapter assigns. Cheap (~50ms, no OCR), which is what lets the
+    streaming web app show detected shapes on the preview *before* the slow
+    OCR label pass has finished.
     """
-    from adapters.diagram.adapter import _load_binary, _detect_nodes, _mask_out_nodes, _detect_edges
+    from adapters.diagram.adapter import _load_binary, _detect_nodes, _mask_out_nodes, _detect_edges, _detect_swimlanes
     import cv2
 
     img = cv2.imread(str(path))
@@ -219,27 +220,37 @@ def _compute_boxes_diagram(path: Path, regions: list[dict]) -> dict[str, dict]:
     nodes = _detect_nodes(binary)
     masked = _mask_out_nodes(binary, nodes)
     edges = _detect_edges(binary, masked, nodes)
+    swimlanes = _detect_swimlanes(binary)
 
-    boxes: dict[str, dict] = {}
-    for region in regions:
-        m = re.match(r"^(node|edge)-(\d+)$", region["id"])
-        if not m:
-            continue
-        kind, idx = m.group(1), int(m.group(2)) - 1
-        bbox = nodes[idx]["bbox"] if kind == "node" and idx < len(nodes) else None
-        if kind == "edge" and idx < len(edges):
-            bbox = edges[idx]["bbox"]
-        if not bbox:
-            continue
+    pad = 6  # px of on-image padding so a thin edge's box stays visible/clickable
+
+    def to_box(bbox):
         x0, y0, x1, y1 = bbox
-        pad = 6  # px of on-image padding so a thin edge's box stays visible/clickable
-        boxes[region["id"]] = {
+        return {
             "top": round(max(0, (y0 - pad) / ih) * 100, 2),
             "left": round(max(0, (x0 - pad) / iw) * 100, 2),
             "width": round(max(1, (x1 - x0 + 2 * pad)) / iw * 100, 2),
             "height": round(max(1, (y1 - y0 + 2 * pad)) / ih * 100, 2),
         }
+
+    boxes: dict[str, dict] = {}
+    for i, node in enumerate(nodes):
+        boxes[f"node-{i + 1}"] = to_box(node["bbox"])
+    for i, edge in enumerate(edges):
+        boxes[f"edge-{i + 1}"] = to_box(edge["bbox"])
+    for i, lane in enumerate(swimlanes):
+        boxes[f"swimlane-{i + 1}"] = to_box(lane["bbox"])
     return boxes
+
+
+def _compute_boxes_diagram(path: Path, regions: list[dict]) -> dict[str, dict]:
+    """Real pixel bounding boxes from the same OpenCV detection the adapter
+    itself runs, matched back to each region by the sequence number in its id
+    ('node-K' / 'edge-K'), since position isn't part of the common schema.
+    Swimlane dividers get a real box too (see compute_all_diagram_boxes).
+    """
+    all_boxes = compute_all_diagram_boxes(path)
+    return {r["id"]: all_boxes[r["id"]] for r in regions if r["id"] in all_boxes}
 
 
 def run_eval_result() -> dict:

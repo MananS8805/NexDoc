@@ -213,11 +213,20 @@ def run_checks(wb: Workbook, regions: list[Region]) -> list[Check]:
     return [_check_cross_sheet_refs(wb, regions), _check_totals_consistency(wb, regions)]
 
 
-def build_artifact(path: str | Path) -> dict:
-    """Runs the full pipeline and returns the common-schema artifact as a dict."""
+def build_artifact(path: str | Path, on_region=None) -> dict:
+    """Runs the full pipeline and returns the common-schema artifact as a dict.
+
+    `on_region`, if given, is called with each Region the moment the adapter
+    yields it (before checks run) — the hook the web app's streaming endpoint
+    uses to show regions as they land. It does not change the result.
+    """
     path = Path(path)
     wb = load_workbook(path, data_only=False)
-    regions = list(_iter_regions(wb))
+    regions = []
+    for region in _iter_regions(wb):
+        regions.append(region)
+        if on_region:
+            on_region(region)
     checks = run_checks(wb, regions)
     source = Source(path=str(path), hash=sha256_of_file(path), adapter_version=ADAPTER_VERSION)
     artifact = Artifact(

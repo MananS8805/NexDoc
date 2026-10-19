@@ -144,12 +144,21 @@ scanned, OCR-dependent document is also available at
 you want to demo the OCR path specifically (includes a Hindi line, to show
 non-English script support).
 
-**Local web app**: the same pipeline, wrapped in a local-only interactive UI
-so you can drag a file in instead of typing a command:
+**Local web app**: the same pipeline in an interactive workspace — drag a file in
+(or click a bundled sample) and watch it stream through the adapters:
 
 ```bash
 uvicorn webapp.main:app --reload
 ```
+
+It shows the uploaded file next to the live region stream (hover either side to
+link them), a reconstruction of what was understood, a **semantic graph** of the
+relationships nexDoc kept (exportable as Mermaid), and an **X-ray** of what a
+generic "flatten it" pipeline would have lost. The OCR model warms up in the
+background and results are cached by content hash. Measured speed-ups, and the
+ideas that were measured and rejected, are in
+[`webapp/README.md`](webapp/README.md#performance--what-was-measured-what-changed-what-didnt);
+OCR engine alternatives are in [`docs/ocr-engine-options.md`](docs/ocr-engine-options.md).
 
 See [`webapp/README.md`](webapp/README.md) for what it does and doesn't add
 (no accounts, no database, no hosting — see
@@ -196,6 +205,10 @@ docs/
 tests/
   fixtures/                generator scripts + the real fixture files they produce
   test_schema_conformance.py   validates real adapter output against docs/schema.json
+webapp/
+  main.py                  FastAPI routes (page, analyze, NDJSON stream, engine, samples, ask)
+  engine.py                OCR warm-up, result cache, streaming pipeline, X-ray baselines
+  static/                  the UI: landing + workspace (index.html, styles.css, js/)
 scripts/build_prototype.py     bakes real adapter output into a static HTML report
 design/preprocessing-pipeline-mock.html    the original UI design spec (untouched)
 ```

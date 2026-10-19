@@ -70,9 +70,10 @@ def sniff_kind(path: str | Path) -> str:
     )
 
 
-def build_artifact_for(path: str | Path) -> tuple[str, dict]:
+def build_artifact_for(path: str | Path, on_region=None) -> tuple[str, dict]:
     """Sniffs the file's real kind and runs the matching adapter's
-    build_artifact against it. Returns (kind, artifact_dict).
+    build_artifact against it. Returns (kind, artifact_dict). `on_region`
+    is forwarded to the adapter (see each adapter's build_artifact).
     """
     kind = sniff_kind(path)
     if kind == "spreadsheet":
@@ -83,4 +84,4 @@ def build_artifact_for(path: str | Path) -> tuple[str, dict]:
         from adapters.diagram.adapter import build_artifact
     else:  # pragma: no cover — sniff_kind only ever returns SUPPORTED_KINDS
         raise UnsupportedArtifactError(f"no adapter registered for kind '{kind}'")
-    return kind, build_artifact(path)
+    return kind, build_artifact(path, on_region=on_region)

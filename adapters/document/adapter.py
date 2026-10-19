@@ -154,7 +154,13 @@ def _extract_born_digital(page, is_first_page_of_document: bool) -> Iterator[Reg
 
 
 def _ocr_page(page) -> Iterator[Region]:
-    pix = page.get_pixmap(dpi=200)
+    # 150dpi, not 200: measured on tests/fixtures/note_scanned.pdf (English +
+    # Devanagari), the OCR text is character-for-character identical at both
+    # resolutions while CPU OCR time drops ~20% (27.5s -> 22.0s). Going lower
+    # (120dpi, or shrinking EasyOCR's canvas_size) was measured to start
+    # corrupting characters ("Signed:" -> "Signedः", "16" -> "1६"), so this is
+    # the lowest setting that was verified not to cost accuracy.
+    pix = page.get_pixmap(dpi=150)
     image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
     image_np = np.array(image)
 
@@ -293,12 +299,21 @@ def run_checks(regions: list[Region]) -> list[Check]:
     ]
 
 
-def build_artifact(path: str | Path) -> dict:
-    """Runs the full pipeline and returns the common-schema artifact as a dict."""
+def build_artifact(path: str | Path, on_region=None) -> dict:
+    """Runs the full pipeline and returns the common-schema artifact as a dict.
+
+    `on_region`, if given, is called with each Region the moment the adapter
+    yields it (before checks run) — the hook the web app's streaming endpoint
+    uses to show regions as they land. It does not change the result.
+    """
     path = Path(path)
     doc = fitz.open(path)
+    regions = []
     try:
-        regions = list(_iter_regions(doc))
+        for region in _iter_regions(doc):
+            regions.append(region)
+            if on_region:
+                on_region(region)
     finally:
         doc.close()
     checks = run_checks(regions)

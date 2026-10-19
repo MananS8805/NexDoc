@@ -29,6 +29,12 @@ Request flow for the main endpoint (`POST /api/analyze`):
 No routing logic, adapter logic, or output-shaping logic is duplicated here;
 every real transformation happens in adapters/ and scripts/build_prototype.py.
 
+`webapp/engine.py` adds the speed/streaming layer around that same flow:
+`POST /api/analyze/stream` (NDJSON events as the adapters yield regions),
+OCR warm-up at startup (`GET /api/engine`), a SHA-256 result cache, the
+"X-ray" baselines, and `GET /api/samples` (whitelisted fixtures). Still no
+adapter logic of its own.
+
 Two smaller endpoints wire the real Groq-backed task-accuracy Q&A
 (`qa/groq_qa.py`) into the same page: `GET /api/ask/status` reports whether
 `GROQ_API_KEY` is configured (no network call), and `POST /api/ask` answers
@@ -40,7 +46,9 @@ logic is duplicated here either.
 from __future__ import annotations
 
 import base64
+import hmac
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -49,8 +57,10 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -64,7 +74,61 @@ for p in (str(ROOT), str(ROOT / "scripts")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-app = FastAPI(title="nexDoc — local web app")
+from webapp import engine  # noqa: E402  (needs the sys.path setup above)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Start loading the OCR model in the background so the first scan/diagram
+    # a user drops in doesn't pay the multi-second model load. Only runs
+    # under a real server (importing this module in tests starts nothing).
+    engine.WARMUP.start()
+    yield
+
+
+app = FastAPI(title="nexDoc — local web app", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def no_stale_assets(request, call_next):
+    """The UI's HTML/JS/CSS are edited constantly while this runs as a local
+    dev tool; `no-cache` makes the browser revalidate (cheap 304s) instead of
+    silently serving a stale script."""
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def optional_password(request, call_next):
+    """Off by default (local use). When NEXDOC_PASSWORD is set — which a public
+    deployment must do, since the app otherwise has no login and its Q&A box
+    spends the host's Groq key — every route except /healthz requires HTTP
+    Basic auth with that password (any username). Registered after the cache
+    middleware so it is the outermost layer."""
+    password = os.environ.get("NEXDOC_PASSWORD")
+    if password and request.url.path != "/healthz":
+        ok = False
+        header = request.headers.get("authorization", "")
+        if header.lower().startswith("basic "):
+            try:
+                _user, _, given = base64.b64decode(header[6:]).decode("utf-8").partition(":")
+                ok = hmac.compare_digest(given.encode("utf-8"), password.encode("utf-8"))
+            except Exception:
+                ok = False
+        if not ok:
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="nexDoc", charset="UTF-8"'})
+    return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz() -> JSONResponse:
+    """Liveness for the platform. Deliberately 200 while the OCR model is still
+    warming — spreadsheets and born-digital PDFs work immediately; only OCR
+    work waits (see `ocr` for the real state)."""
+    return JSONResponse({"ok": True, "ocr": engine.WARMUP.status()["state"]})
 
 
 def _error(status_code: int, message: str) -> JSONResponse:
@@ -140,114 +204,48 @@ async def analyze(file: UploadFile = File(...)) -> JSONResponse:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
-def _png_data_url(png_bytes: bytes) -> str:
-    return "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
-
-
-def _build_preview_images(kind: str, tmp_path: Path) -> list[dict[str, Any]] | None:
-    """Real pixels from the file the user actually uploaded — not the
-    abstract confidence-colored box overlay `renderPreview()` already drew
-    (that stays; this is additive). Returns a list of
-    `{dataUrl, width, height, pageLabel}` — one entry for a diagram's single
-    image, one per page for a document — or `None` when there's no bitmap
-    representation to show (a spreadsheet has no "picture of itself"; the
-    existing cell-grid preview already covers that case honestly).
-
-    Runs against `tmp_path` before the caller's `finally: shutil.rmtree`
-    deletes it — this endpoint still writes nothing to disk beyond that
-    same temp file every other step here already uses, and the images are
-    embedded directly in the JSON response rather than served from a
-    second endpoint, so nothing persists server-side after the response is
-    sent.
-    """
-    if kind == "diagram":
-        from PIL import Image
-
-        with Image.open(tmp_path) as img:
-            img = img.convert("RGB")
-            width, height = img.size
-            import io
-
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            return [{"dataUrl": _png_data_url(buf.getvalue()), "width": width, "height": height, "pageLabel": None}]
-
-    if kind == "document":
-        import fitz
-
-        pages = []
-        doc = fitz.open(tmp_path)
-        try:
-            for page in doc:
-                # 150dpi: readable text, small enough to embed several pages
-                # directly in one JSON response without the payload getting
-                # unreasonable — this is a preview image, not an archival
-                # scan, so it doesn't need to match the OCR pass's own
-                # working resolution (adapters/document/adapter.py renders
-                # at 200dpi for that separate purpose).
-                pix = page.get_pixmap(dpi=150)
-                pages.append(
-                    {
-                        "dataUrl": _png_data_url(pix.tobytes("png")),
-                        "width": pix.width,
-                        "height": pix.height,
-                        "pageLabel": f"Page {page.number + 1}",
-                    }
-                )
-        finally:
-            doc.close()
-        return pages
-
-    return None  # spreadsheet: no bitmap representation; frontend keeps the cell-grid preview
+_build_preview_images = engine.build_preview_images
 
 
 def _build_doc(kind: str, tmp_path: Path, artifact: dict[str, Any], original_filename: str) -> dict[str, Any]:
-    """Enriches the real artifact into the same UI-facing shape
-    prototype.html's DOCS entries use (region typeLabel + box, table
-    columns, checks, the full schema for the json tab) by calling the exact
-    function that produces those entries today — `build_doc_for` in
-    scripts/build_prototype.py — so the live app and the static report stay
-    driven by one real rendering path, not two.
+    return engine.build_doc(kind, tmp_path, artifact, original_filename)
 
-    `build_doc_for` re-derives per-region screen positions ("box") by
-    re-reading the same temp file (PyMuPDF for PDFs, OpenCV for images,
-    openpyxl for spreadsheets) — the same re-derivation run_adapter.py's CLI
-    already relies on for every real file it's pointed at, not something new
-    for this endpoint. If that re-derivation itself fails for some reason,
-    fall back to the artifact's four output shapes with no position data —
-    the frontend renders everything except the box-overlay preview in that
-    case, rather than the whole request failing over a display nicety.
-    """
-    from build_prototype import build_doc_for
 
-    try:
-        doc = build_doc_for(kind, tmp_path, artifact)
-    except Exception:
-        traceback.print_exc()
-        from adapters.common.outputs import to_table
+@app.post("/api/analyze/stream")
+async def analyze_stream(file: UploadFile = File(...)) -> StreamingResponse:
+    """NDJSON event stream (see webapp/engine.py): start, sniffed, preview,
+    geometry (diagrams), region*, done, xray, end — or error."""
+    if not file.filename:
+        return JSONResponse({"ok": False, "error": "No file was uploaded."}, status_code=400)  # type: ignore[return-value]
+    content = await file.read()
+    if len(content) > engine.MAX_UPLOAD_BYTES:
+        return JSONResponse(  # type: ignore[return-value]
+            {"ok": False, "error": f"'{file.filename}' is {len(content) / 1048576:.0f} MB; this local tool accepts files up to {engine.MAX_UPLOAD_BYTES // 1048576} MB."},
+            status_code=413,
+        )
+    return StreamingResponse(
+        engine.stream_analysis(file.filename, content),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
-        table = to_table(artifact)
-        failed = [c for c in artifact["checks"] if not c["passed"]]
-        check_summary = f"{len(failed)} check{'s' if len(failed) != 1 else ''} flagged" if failed else "all checks passed"
-        doc = {
-            "id": Path(original_filename).stem,
-            "kind": artifact["kind"],
-            "adapter": artifact["adapter"],
-            "title": artifact["artifact"],
-            "meta": f"{len(artifact['regions'])} regions · {check_summary}",
-            "pageLabel": f"{artifact['kind']} · {original_filename}",
-            "regions": [
-                {**r, "typeLabel": f"{r['id']} · {r['type']}", "lang": r.get("language"), "box": None}
-                for r in artifact["regions"]
-            ],
-            "tableColumns": table["columns"],
-            "table": table["rows"],
-            "tableEmptyReason": table.get("empty_reason"),
-            "checks": artifact["checks"],
-            "realArtifact": artifact,
-        }
-    doc["pageLabel"] = f"{artifact['kind']} · {original_filename}"
-    return doc
+
+@app.get("/api/engine")
+def engine_status() -> JSONResponse:
+    return JSONResponse({"ocr": engine.WARMUP.status(), "cache": engine.CACHE.stats()})
+
+
+@app.get("/api/samples")
+def samples() -> JSONResponse:
+    return JSONResponse({"samples": engine.list_samples()})
+
+
+@app.get("/api/samples/{sample_id}")
+def sample_file(sample_id: str):
+    path = engine.sample_path(sample_id)
+    if path is None:
+        return _error(404, f"Unknown sample '{sample_id}'.")
+    return FileResponse(path, filename=path.name)
 
 
 class AskRequest(BaseModel):

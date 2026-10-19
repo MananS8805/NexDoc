@@ -56,6 +56,15 @@ before trusting it)
   Document and diagram don't have a task-accuracy eval yet — a named,
   not-yet-built next step, not an oversight. Never present a fabricated or
   estimated number as measured.
+- **The web app (`webapp/`) streams.** `POST /api/analyze/stream` emits NDJSON
+  events as each adapter yields regions (the CLAUDE.md "live processing
+  pattern"); the UI shows the real file beside the live stream with linked
+  highlighting, a semantic graph of the relationships (Mermaid export), and an
+  X-ray of what the flattened baselines lose. `webapp/engine.py` warms the OCR
+  model at startup and caches results by content hash. Speed claims are
+  A/B-measured (scan OCR at 150dpi: 1.55× faster, identical text); several
+  other ideas were measured and rejected — see `webapp/README.md`. Scanned
+  pages remain the slow path (~15–35s/page on CPU).
 - The web app (`webapp/`) has a real "Ask a question" box wired to
   `qa/groq_qa.py` via `POST /api/ask` — same honest-when-unconfigured
   pattern as the eval script (`GET /api/ask/status` reports whether

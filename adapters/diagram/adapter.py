@@ -855,9 +855,13 @@ def run_checks(regions: list[Region]) -> list[Check]:
     return [_check_edges_reference_existing_nodes(regions), _check_ocr_engine_available(regions)]
 
 
-def build_artifact(path: str | Path) -> dict:
+def build_artifact(path: str | Path, on_region=None) -> dict:
     path = Path(path)
-    regions = list(_iter_regions(path))
+    regions = []
+    for region in _iter_regions(path):
+        regions.append(region)
+        if on_region:
+            on_region(region)
     checks = run_checks(regions)
     source = Source(path=str(path), hash=sha256_of_file(path), adapter_version=ADAPTER_VERSION)
     artifact = Artifact(

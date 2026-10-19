@@ -1,120 +1,325 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>nexDoc — local run</title>
+<title>nexDoc — documents that keep their meaning</title>
+<meta name="description" content="nexDoc reads spreadsheets, PDFs and diagrams in their own terms and converges them onto one AI-ready schema.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css">
+<script>
+  // Apply the saved theme before first paint so there's no light/dark flash.
+  try { var t = localStorage.getItem('nexdoc-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+</script>
 </head>
 <body>
 
-<header class="site-head">
-  <div class="wrap">
-    <div class="mark">
-      <span class="mark-glyph" aria-hidden="true"></span>
-      <span class="mark-name">nexDoc</span>
+<div class="announce">
+  <span>nexDoc 2.0 — streaming extraction, a semantic graph and a flatten-vs-nexDoc X-ray</span>
+  <a href="#workspace" class="announce-link">Try it <span aria-hidden="true">→</span></a>
+</div>
+
+<header class="nav-wrap" id="navWrap">
+  <nav class="pillnav" id="pillnav" aria-label="Primary">
+    <a class="logo" href="#top" aria-label="nexDoc home">
+      <span class="logo-glyph" aria-hidden="true"><i></i></span>
+      <span class="logo-word">nexDoc</span>
+    </a>
+    <div class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#workspace">Workspace</a>
+      <a href="#samples">Samples</a>
     </div>
-    <span class="mock-tag">local run — real adapters, no server-side storage</span>
-  </div>
+    <div class="nav-actions">
+      <button class="icon-btn" id="themeToggle" type="button" aria-label="Toggle light/dark theme" title="Toggle theme">
+        <svg class="ico-moon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg class="ico-sun" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+      <a class="btn btn-white btn-sm" href="#workspace">Open workspace</a>
+    </div>
+  </nav>
 </header>
 
-<main class="wrap">
-  <section class="hero">
-    <h1>Run a real file through the pipeline.</h1>
-    <p class="hero-sub">Drop a <code>.xlsx</code>, <code>.pdf</code>, or <code>.png</code>/<code>.jpg</code> file below. It's routed by real content sniffing to the same spreadsheet, document, or diagram adapter <code>run_adapter.py</code> uses, processed once, and shown here — nothing is stored on disk after the response comes back, and nothing you see is sample data.</p>
+<main id="top">
 
-    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose or drop a file to analyze">
-      <input type="file" id="fileInput" accept=".xlsx,.pdf,.png,.jpg,.jpeg" hidden>
-      <div class="dz-icon" aria-hidden="true">↑</div>
-      <div class="dz-text">
-        <strong>Drop a file here, or click to choose one</strong>
-        <span>.xlsx spreadsheet · .pdf document · .png/.jpg diagram</span>
+  <!-- ===================== HERO ===================== -->
+  <section class="hero" id="hero">
+    <canvas id="sky" aria-hidden="true"></canvas>
+    <div class="sky-mesh" aria-hidden="true"></div>
+
+    <div class="hero-inner">
+      <span class="kicker rise" style="--d:0ms"><i class="kdot"></i>3 ADAPTERS · 1 SCHEMA · ZERO FLATTENING</span>
+      <h1 class="hero-title">
+        <span class="line rise" style="--d:90ms">Documents that keep</span>
+        <span class="line rise" style="--d:180ms">their meaning.</span>
+      </h1>
+      <p class="hero-sub rise" style="--d:300ms">nexDoc reads spreadsheets, PDFs and diagrams in their own terms — formulas stay formulas, connections stay connections — and converges them onto one AI-ready schema.</p>
+      <div class="hero-cta rise" style="--d:420ms">
+        <a class="btn btn-white" href="#workspace">Open workspace</a>
+        <a class="btn btn-glass" href="#samples">Try a sample <span aria-hidden="true">→</span></a>
       </div>
     </div>
 
-    <div class="status-row" id="statusRow" hidden>
-      <span class="live-status" id="liveStatus"><span class="live-dot"></span><span id="liveStatusText">idle</span></span>
-      <span id="statusFile" class="status-file"></span>
-    </div>
-
-    <div class="error-banner" id="errorBanner" hidden></div>
+    <!-- Fact-recovery chart: the real, measured eval results (docs/eval-methodology.md) -->
+    <figure class="hero-chart" aria-label="Fact recovery on the project's own eval fixtures: flattened baseline versus nexDoc">
+      <svg viewBox="0 0 1200 230" preserveAspectRatio="none" role="img" aria-hidden="true">
+        <defs>
+          <linearGradient id="gapFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#fff" stop-opacity="0.22"/>
+            <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path class="chart-gap" d="M0,52 C140,48 240,40 300,44 C420,50 480,46 600,44 C720,42 800,46 900,44 C1000,40 1100,44 1200,40 L1200,205 C1100,208 1040,210 960,208 C880,205 820,168 600,132 C440,110 360,205 300,208 C200,212 100,206 0,208 Z" fill="url(#gapFill)"/>
+        <path class="chart-line chart-base" pathLength="1" d="M0,208 C100,206 200,212 300,208 C360,205 440,110 600,132 C820,168 880,205 960,208 C1040,210 1100,208 1200,205"/>
+        <path class="chart-line chart-nx" pathLength="1" d="M0,52 C140,48 240,40 300,44 C420,50 480,46 600,44 C720,42 800,46 900,44 C1000,40 1100,44 1200,40"/>
+      </svg>
+      <div class="chart-pt" style="--x:25%; --y:19%; --d:900ms"><i></i><small>SPREADSHEET · FACT RECOVERY</small><b><s>0%</s> → 100%</b></div>
+      <div class="chart-pt" style="--x:50%; --y:19%; --d:1150ms"><i></i><small>DOCUMENT · FACT RECOVERY</small><b><s>50%</s> → 100%</b></div>
+      <div class="chart-pt" style="--x:77%; --y:19%; --d:1400ms"><i></i><small>DIAGRAM · FACT RECOVERY</small><b><s>0%</s> → 100%</b></div>
+      <figcaption class="chart-cap">flattened baseline vs. nexDoc · deterministic fact-lookup evals on the repo's own fixtures</figcaption>
+    </figure>
   </section>
 
-  <section class="result" id="result" hidden>
-    <div class="result-head">
-      <div>
-        <h2 id="resultTitle"></h2>
-        <p class="result-meta" id="resultMeta"></p>
+  <!-- ===================== HOW IT WORKS ===================== -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <span class="mono-label">HOW IT WORKS</span>
+        <h2>One schema. Three ways of reading.</h2>
+        <p>Generic pipelines flatten everything to text and lose the relationships. nexDoc keeps each artifact's native structure, then maps it all onto the same node/edge shape.</p>
       </div>
-      <div class="result-head-right">
-        <span class="badge adapter-badge" id="resultAdapter"></span>
-        <div class="download-menu" id="downloadMenu">
-          <button type="button" class="download-btn" id="downloadToggle" aria-haspopup="true" aria-expanded="false">Download ▾</button>
-          <div class="download-list" id="downloadList" hidden>
-            <button type="button" data-format="schema">schema.json</button>
-            <button type="button" data-format="text">text.txt</button>
-            <button type="button" data-format="structured">structured.json</button>
-            <button type="button" data-format="table">table.json</button>
+
+      <div class="bento reveal">
+        <article class="bcell">
+          <div class="art" aria-hidden="true">
+            <svg viewBox="0 0 320 170" class="art-svg">
+              <g class="cells">
+                <rect x="30" y="20" width="44" height="22" rx="3"/><rect x="80" y="20" width="44" height="22" rx="3"/><rect x="130" y="20" width="44" height="22" rx="3"/><rect x="180" y="20" width="44" height="22" rx="3"/>
+                <rect x="30" y="48" width="44" height="22" rx="3"/><rect class="hot" x="80" y="48" width="44" height="22" rx="3"/><rect class="hot" x="130" y="48" width="44" height="22" rx="3"/><rect class="hot" x="180" y="48" width="44" height="22" rx="3"/>
+                <rect x="30" y="76" width="44" height="22" rx="3"/><rect x="80" y="76" width="44" height="22" rx="3"/><rect x="130" y="76" width="44" height="22" rx="3"/><rect x="180" y="76" width="44" height="22" rx="3"/>
+                <rect class="formula" x="236" y="48" width="64" height="22" rx="3"/>
+              </g>
+              <path class="flow" d="M236,59 C226,30 160,28 124,52" /><path class="flow f2" d="M236,59 C220,92 150,96 124,59" /><path class="flow f3" d="M236,59 C228,70 210,70 202,59" />
+              <circle r="3" class="pulse"><animateMotion dur="2.6s" repeatCount="indefinite" path="M236,59 C226,30 160,28 124,52"/></circle>
+              <circle r="3" class="pulse"><animateMotion dur="2.6s" begin="0.9s" repeatCount="indefinite" path="M236,59 C220,92 150,96 124,59"/></circle>
+              <text x="268" y="62" class="svg-mono" text-anchor="middle">=SUM()</text>
+              <text x="30" y="132" class="svg-mono dim">formula → refs, kept as a graph</text>
+            </svg>
+          </div>
+          <h3>Native extraction</h3>
+          <p>A formula stays a formula. A flowchart arrow stays an edge with a direction. Each adapter reads its file in its own terms — no flatten-to-text first step.</p>
+        </article>
+
+        <article class="bcell">
+          <div class="art" aria-hidden="true">
+            <svg viewBox="0 0 320 170" class="art-svg">
+              <path id="m1" class="flow" d="M20,34 C110,34 150,85 214,85" /><path id="m2" class="flow f2" d="M20,85 L214,85" /><path id="m3" class="flow f3" d="M20,136 C110,136 150,85 214,85" />
+              <text x="20" y="26" class="svg-mono dim">.xlsx</text><text x="20" y="77" class="svg-mono dim">.pdf</text><text x="20" y="128" class="svg-mono dim">.png</text>
+              <g class="ring" transform="translate(250 85)">
+                <circle r="32" class="ring-c"/><circle r="20" class="ring-c in"/>
+                <g class="ticks"><path d="M0,-38 V-32 M0,38 V32 M-38,0 H-32 M38,0 H32 M27,-27 l-4,4 M-27,27 l4,-4 M27,27 l-4,-4 M-27,-27 l4,4"/></g>
+                <text y="3" class="svg-mono" text-anchor="middle">schema</text>
+              </g>
+              <circle r="3" class="pulse"><animateMotion dur="2.8s" repeatCount="indefinite"><mpath href="#m1"/></animateMotion></circle>
+              <circle r="3" class="pulse"><animateMotion dur="2.8s" begin="0.5s" repeatCount="indefinite"><mpath href="#m2"/></animateMotion></circle>
+              <circle r="3" class="pulse"><animateMotion dur="2.8s" begin="1s" repeatCount="indefinite"><mpath href="#m3"/></animateMotion></circle>
+            </svg>
+          </div>
+          <h3>One common schema</h3>
+          <p>Spreadsheets, documents and diagrams all converge on the same regions + relationships + checks. A downstream system integrates once, not once per file type.</p>
+        </article>
+
+        <article class="bcell">
+          <div class="art" aria-hidden="true">
+            <svg viewBox="0 0 320 170" class="art-svg">
+              <path class="arc" d="M60,140 A100,100 0 0 1 260,140"/><path class="arc a2" d="M90,140 A70,100 0 0 1 230,140"/><path class="arc a3" d="M60,140 H260"/>
+              <circle class="pt" cx="82" cy="92" r="5"/><circle class="pt" cx="160" cy="40" r="5"/><circle class="pt" cx="238" cy="92" r="5"/>
+              <circle r="3.5" class="pulse"><animateMotion dur="3.2s" repeatCount="indefinite" path="M60,140 A100,100 0 0 1 260,140"/></circle>
+              <g transform="translate(160 118)"><rect x="-52" y="-12" width="104" height="24" rx="12" class="pill-bg"/><text y="4" class="svg-mono" text-anchor="middle">✓ CHECKS PASS</text></g>
+            </svg>
+          </div>
+          <h3>Validated, not just confident</h3>
+          <p>Every region carries a confidence from a real signal, and artifact-level checks — does the total match its line items? does every edge hit a real node? — can fail independently.</p>
+        </article>
+
+        <article class="bcell wide">
+          <div class="wide-copy">
+            <h3>A pipeline you can watch</h3>
+            <p>Regions stream out of the adapters as they're found — diagram shapes first, labels as OCR reads them — instead of after a spinner. The engine warms its OCR model in the background and caches results by content hash.</p>
+          </div>
+          <div class="art wide-art" aria-hidden="true">
+            <svg viewBox="0 0 640 120" class="art-svg">
+              <line x1="30" y1="60" x2="610" y2="60" class="rail"/>
+              <line x1="30" y1="60" x2="610" y2="60" class="rail live" pathLength="1"/>
+              <g class="stations">
+                <g transform="translate(40 60)" style="--i:0"><circle r="7"/><text y="30" text-anchor="middle" class="svg-mono">SNIFF</text></g>
+                <g transform="translate(185 60)" style="--i:1"><circle r="7"/><text y="30" text-anchor="middle" class="svg-mono">ROUTE</text></g>
+                <g transform="translate(330 60)" style="--i:2"><circle r="7"/><text y="30" text-anchor="middle" class="svg-mono">EXTRACT</text></g>
+                <g transform="translate(475 60)" style="--i:3"><circle r="7"/><text y="30" text-anchor="middle" class="svg-mono">MAP</text></g>
+                <g transform="translate(600 60)" style="--i:4"><circle r="7"/><text y="30" text-anchor="middle" class="svg-mono">VALIDATE</text></g>
+              </g>
+              <circle r="4" class="pulse big"><animateMotion dur="4.2s" repeatCount="indefinite" path="M40,60 L600,60"/></circle>
+            </svg>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== WORKSPACE ===================== -->
+  <section class="section workspace" id="workspace">
+    <div class="wrap">
+      <div class="sec-head reveal row-head">
+        <div>
+          <span class="mono-label">WORKSPACE</span>
+          <h2>Run a real file through it.</h2>
+          <p>Drop a <code>.xlsx</code>, <code>.pdf</code> or <code>.png</code>/<code>.jpg</code>. It's routed by real content sniffing to the same adapters the CLI uses. Nothing is stored — results live in this tab.</p>
+        </div>
+        <div class="engine-chip" id="engineChip" data-state="idle" title="The OCR model loads once in the background when the server starts">
+          <span class="spin" aria-hidden="true"></span>
+          <span class="ec-main" id="engineText">OCR engine · checking…</span>
+        </div>
+      </div>
+
+      <div class="dropzone reveal" id="dropzone" tabindex="0" role="button" aria-label="Choose or drop a file to analyze">
+        <input type="file" id="fileInput" accept=".xlsx,.pdf,.png,.jpg,.jpeg" hidden>
+        <div class="dz-ring" aria-hidden="true"></div>
+        <div class="dz-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
+        </div>
+        <div class="dz-text">
+          <strong>Drop a file here, or click to choose one</strong>
+          <span>.xlsx spreadsheet · .pdf document · .png/.jpg diagram</span>
+        </div>
+      </div>
+
+      <div class="samples reveal" id="samples">
+        <span class="mono-label">OR TRY A SAMPLE</span>
+        <div class="sample-row" id="sampleRow" aria-live="polite"></div>
+      </div>
+
+      <ol class="tracker" id="tracker" hidden aria-label="Pipeline progress">
+        <li data-step="sniff"><span class="t-dot"></span><b>Detect type</b><em>content sniffing</em><i class="ms"></i></li>
+        <li data-step="route"><span class="t-dot"></span><b>Route</b><em>pick adapter</em><i class="ms"></i></li>
+        <li data-step="extract"><span class="t-dot"></span><b>Extract</b><em>native structure</em><i class="ms"></i></li>
+        <li data-step="map"><span class="t-dot"></span><b>Map</b><em>common schema</em><i class="ms"></i></li>
+        <li data-step="validate"><span class="t-dot"></span><b>Validate</b><em>confidence + checks</em><i class="ms"></i></li>
+      </ol>
+
+      <div class="error-banner" id="errorBanner" hidden></div>
+
+      <section class="result" id="result" hidden>
+        <div class="result-head">
+          <div class="rh-main">
+            <h3 id="resultTitle"></h3>
+            <p class="result-meta" id="resultMeta"></p>
+          </div>
+          <div class="rh-right">
+            <span class="chip chip-timing" id="resultTimings" hidden></span>
+            <span class="chip chip-accent" id="resultAdapter"></span>
+            <div class="download-menu" id="downloadMenu">
+              <button type="button" class="btn btn-ghost btn-sm" id="downloadToggle" aria-haspopup="true" aria-expanded="false">Export <span aria-hidden="true">▾</span></button>
+              <div class="download-list" id="downloadList" hidden>
+                <button type="button" data-format="schema">schema.json</button>
+                <button type="button" data-format="text">text.txt</button>
+                <button type="button" data-format="structured">structured.json</button>
+                <button type="button" data-format="table">table.json</button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <div class="confidence-strip" id="confidenceStrip"></div>
-    <div class="checks-strip" id="checksStrip"></div>
+        <div class="confidence-strip" id="confidenceStrip"></div>
+        <div class="checks-strip" id="checksStrip"></div>
 
-    <div class="recon-section">
-      <h3>Reconstruction <span class="recon-sub">— what the pipeline understood this file to be</span></h3>
-      <div class="recon-view" id="reconView"></div>
-    </div>
+        <!-- ===== the parallel viewer: source on the left, live extraction on the right ===== -->
+        <div class="viewer" id="viewer">
+          <div class="pane src-pane" id="srcCard">
+            <div class="pane-bar">
+              <div class="pane-title"><span class="mono-label">SOURCE</span><span class="pane-file" id="srcFile"></span></div>
+              <div class="pane-tools">
+                <div class="seg" role="tablist" aria-label="Source view">
+                  <button type="button" id="modeSource" role="tab" aria-selected="true">Source</button>
+                  <button type="button" id="modeRecon" role="tab" aria-selected="false">Reconstruction</button>
+                </div>
+                <div class="zoom" id="zoomTools">
+                  <button type="button" class="icon-btn sm" id="zoomOut" aria-label="Zoom out">−</button>
+                  <button type="button" class="zoom-label" id="zoomLabel" aria-label="Reset zoom">100%</button>
+                  <button type="button" class="icon-btn sm" id="zoomIn" aria-label="Zoom in">+</button>
+                </div>
+                <button type="button" class="chip-toggle" id="labelsToggle" aria-pressed="false">Labels</button>
+              </div>
+            </div>
+            <div class="src-scroll" id="srcScroll">
+              <div class="page-frame" id="pageFrame">
+                <div class="scanline" id="scanline"></div>
+                <div class="empty-state" id="noPreview" hidden>No positional preview available for this file — see the Stream tab for the full region list.</div>
+              </div>
+              <div class="recon-view" id="reconView" hidden></div>
+            </div>
+            <div class="pane-foot">
+              <span class="legend"><i class="lg lg-hi"></i>high confidence</span>
+              <span class="legend"><i class="lg lg-lo"></i>needs review</span>
+              <span class="legend"><i class="lg lg-gh"></i>detected, reading…</span>
+              <span class="pane-hint" id="srcHint">hover a region to link both panes</span>
+            </div>
+          </div>
 
-    <div class="ask-box" id="askBox">
-      <h3>Ask a question</h3>
-      <p class="ask-sub" id="askSub">Checking whether Groq Q&amp;A is configured…</p>
-      <form id="askForm" class="ask-form">
-        <input type="text" id="askInput" placeholder="e.g. how much do I spend on Housing?" autocomplete="off" disabled>
-        <button type="submit" id="askSubmit" disabled>Ask</button>
-      </form>
-      <div class="ask-answer" id="askAnswer" hidden></div>
-    </div>
-
-    <div class="demo">
-      <div class="preview-col">
-        <h3>Input preview <span class="recon-sub" id="previewSub">— the actual uploaded file, with detected regions overlaid</span></h3>
-        <div class="page-frame" id="pageFrame">
-          <div class="scanline" id="scanline"></div>
-          <div class="empty-state" id="noPreview" hidden>No positional preview available for this file — see the <strong>structured</strong> tab for the full region list.</div>
+          <div class="pane out-pane">
+            <div class="pane-bar">
+              <div class="tabs" role="tablist" aria-label="Output view">
+                <button class="tab-btn" role="tab" aria-selected="true" data-tab="stream" type="button">Stream <span class="tab-count" id="streamCount">0</span></button>
+                <button class="tab-btn" role="tab" aria-selected="false" data-tab="graph" type="button">Graph</button>
+                <button class="tab-btn" role="tab" aria-selected="false" data-tab="xray" type="button">X-ray</button>
+                <button class="tab-btn" role="tab" aria-selected="false" data-tab="table" type="button">Table</button>
+                <button class="tab-btn" role="tab" aria-selected="false" data-tab="json" type="button">JSON</button>
+                <button class="tab-btn" role="tab" aria-selected="false" data-tab="text" type="button">Text</button>
+              </div>
+            </div>
+            <div class="out-body">
+              <div id="panel-stream" role="tabpanel">
+                <div class="stream-head" id="streamHead"></div>
+                <div class="feed" id="feed" aria-live="polite"></div>
+              </div>
+              <div id="panel-graph" role="tabpanel" hidden></div>
+              <div id="panel-xray" role="tabpanel" hidden></div>
+              <div id="panel-table" role="tabpanel" hidden></div>
+              <pre id="panel-json" role="tabpanel" class="code-block" hidden></pre>
+              <div id="panel-text" role="tabpanel" class="text-block" hidden></div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div class="output-col">
-        <h3>Extracted output</h3>
-        <div class="tabs" role="tablist" aria-label="Output format">
-          <button class="tab-btn" id="tabBtn-text" role="tab" aria-selected="true" data-tab="text" type="button">text</button>
-          <button class="tab-btn" id="tabBtn-structured" role="tab" aria-selected="false" data-tab="structured" type="button">structured</button>
-          <button class="tab-btn" id="tabBtn-json" role="tab" aria-selected="false" data-tab="json" type="button">json</button>
-          <button class="tab-btn" id="tabBtn-table" role="tab" aria-selected="false" data-tab="table" type="button">table</button>
+        <div class="ask-box" id="askBox">
+          <div class="ask-head">
+            <h3>Ask a question</h3>
+            <span class="chip" id="askBadge">Groq</span>
+          </div>
+          <p class="ask-sub" id="askSub">Checking whether Groq Q&amp;A is configured…</p>
+          <form id="askForm" class="ask-form">
+            <input type="text" id="askInput" placeholder="e.g. how much do I spend on Housing?" autocomplete="off" disabled>
+            <button type="submit" id="askSubmit" class="btn btn-white btn-sm" disabled>Ask</button>
+          </form>
+          <div class="ask-answer" id="askAnswer" hidden></div>
         </div>
-        <div class="panel-body">
-          <div id="panel-text" role="tabpanel" class="text-block"></div>
-          <div id="panel-structured" role="tabpanel" hidden></div>
-          <pre id="panel-json" role="tabpanel" class="code-block" hidden></pre>
-          <div id="panel-table" role="tabpanel" hidden></div>
-        </div>
-      </div>
+      </section>
     </div>
   </section>
 </main>
 
-<footer>
-  <div class="wrap">
-    <p>Local-only tool. Each run processes one file in memory/temp storage and returns the result — refreshing the page loses it. No accounts, no database, no hosting. See <code>docs/adr/0003-static-html-over-live-server.md</code> for why that stayed out of scope here too.</p>
+<footer class="foot">
+  <div class="wrap foot-in">
+    <span class="logo foot-logo"><span class="logo-glyph" aria-hidden="true"><i></i></span><span class="logo-word">nexDoc</span></span>
+    <p>Local-only tool. Each run processes one file in memory/temp storage and returns the result — refreshing loses it. No accounts, no database, no hosting. See <code>docs/adr/0003-static-html-over-live-server.md</code>.</p>
   </div>
 </footer>
 
-<script src="/static/app.js"></script>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/static/js/graph.js"></script>
+<script src="/static/js/hero.js"></script>
+<script src="/static/js/app.js"></script>
 </body>
 </html>

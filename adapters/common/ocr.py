@@ -65,6 +65,7 @@ crop (a diagram node/edge label).
 
 from __future__ import annotations
 
+import threading
 from typing import Iterable, Sequence
 
 # English + Hindi/Devanagari by default: English because it's the lingua
@@ -93,6 +94,13 @@ _READERS: dict[tuple[str, ...], object] = {}
 # already succeeded.
 _STATUS: dict[tuple[str, ...], tuple[bool, str]] = {}
 
+# Guards reader construction. The web app loads the model in a background
+# thread at startup while a request thread may call get_reader() at the same
+# time; without this, both saw "not cached yet" and each built their own copy
+# of the multi-hundred-MB model (double the CPU, and the request waited for
+# its own redundant load — a scan that started mid-warm-up took 41s vs ~15s).
+_LOAD_LOCK = threading.RLock()
+
 
 def _key(languages: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(languages) if languages else tuple(DEFAULT_LANGUAGES)
@@ -109,9 +117,11 @@ def get_reader(languages: Sequence[str] | None = None):
     """
     key = _key(languages)
     if key not in _READERS:
-        import easyocr  # imported lazily so importing this module never requires torch to already be loaded
+        with _LOAD_LOCK:
+            if key not in _READERS:  # re-check: another thread may have finished loading while we waited
+                import easyocr  # imported lazily so importing this module never requires torch to already be loaded
 
-        _READERS[key] = easyocr.Reader(list(key), gpu=False, verbose=False)
+                _READERS[key] = easyocr.Reader(list(key), gpu=False, verbose=False)
     return _READERS[key]
 
 
@@ -131,11 +141,13 @@ def ocr_engine_status(languages: Sequence[str] | None = None) -> tuple[bool, str
     """
     key = _key(languages)
     if key not in _STATUS:
-        try:
-            get_reader(key)
-            _STATUS[key] = (True, f"EasyOCR reader ready (languages: {', '.join(key)}, CPU)")
-        except Exception as exc:  # easyocr/torch can raise many different types (network, torch, model-file)
-            _STATUS[key] = (False, f"{type(exc).__name__}: {exc}")
+        with _LOAD_LOCK:
+            if key not in _STATUS:
+                try:
+                    get_reader(key)
+                    _STATUS[key] = (True, f"EasyOCR reader ready (languages: {', '.join(key)}, CPU)")
+                except Exception as exc:  # easyocr/torch can raise many different types (network, torch, model-file)
+                    _STATUS[key] = (False, f"{type(exc).__name__}: {exc}")
     return _STATUS[key]
 
 
