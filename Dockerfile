@@ -8,7 +8,8 @@
 #     per-process; extra workers would each load their own copy of the model
 #   * the OCR model is warmed in the background at startup (webapp/engine.py)
 #
-# Build:  python scripts/stage_ocr_models.py && docker build -t nexdoc .
+# Build:  docker build -t nexdoc .   (optionally `python scripts/stage_ocr_models.py` first
+#         to avoid the in-build model download on a flaky connection)
 # Run:    docker run --rm -p 8000:8000 -e NEXDOC_PASSWORD=choose-one nexdoc
 FROM python:3.12-slim
 
@@ -30,14 +31,16 @@ COPY requirements-docker.txt .
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision \
  && pip install -r requirements-docker.txt
 
-# OCR models: staged on the host by `python scripts/stage_ocr_models.py` and COPIED
-# in, because a download inside `docker build` can't resume and a single dropped
-# connection failed this step before. The RUN below proves they load with the
-# network disabled, so a bad/missing file fails the build, not the first request.
+# OCR models. Local build: `python scripts/stage_ocr_models.py` puts the weights in
+# docker-models/ and they are COPYed in (no network). Git-based host: the folder
+# holds only a .gitkeep, so ensure_ocr_models.py downloads them with retries.
+# Either way it then proves they load with downloads disabled, so a bad file
+# fails the build rather than the first request.
 RUN mkdir -p /home/app/.EasyOCR/model && chown -R app:app /home/app/.EasyOCR
 USER app
 COPY --chown=app:app docker-models/ /home/app/.EasyOCR/model/
-RUN python -c "import easyocr; easyocr.Reader(['en','hi'], gpu=False, download_enabled=False, verbose=False); print('OCR models load offline: OK')"
+COPY --chown=app:app scripts/ensure_ocr_models.py /tmp/ensure_ocr_models.py
+RUN python /tmp/ensure_ocr_models.py && rm /tmp/ensure_ocr_models.py
 
 COPY --chown=app:app adapters ./adapters
 COPY --chown=app:app scripts ./scripts

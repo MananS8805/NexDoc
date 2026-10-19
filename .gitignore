@@ -9,4 +9,5 @@ out/
 .env
 
 # OCR weights staged for the Docker build (large; regenerate with scripts/stage_ocr_models.py)
-docker-models/
+docker-models/*
+!docker-models/.gitkeep

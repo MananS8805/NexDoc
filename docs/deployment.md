@@ -8,18 +8,26 @@ verified.
 ## Build and run
 
 ```bash
-python scripts/stage_ocr_models.py     # one-time: copies the OCR weights into ./docker-models/
+python scripts/stage_ocr_models.py     # optional: pre-fetch the OCR weights (see below)
 docker build -t nexdoc .
 docker run --rm -p 8000:8000 -e NEXDOC_PASSWORD=choose-a-password nexdoc
 # open http://localhost:8000  (any username, that password)
 ```
 
-Why the staging step: the OCR weights (~300 MB) used to be downloaded *inside*
-`docker build`, which cannot resume — one dropped connection failed the whole
-build. The staging script does the download (if needed) on the host with
-retries, and the Dockerfile then verifies the weights load with the network
-disabled, so a bad file fails the build rather than the first request.
-`docker-models/` is git-ignored.
+Two ways the OCR weights (~300 MB) get into the image — both tested:
+
+- **Local build** (above): `stage_ocr_models.py` copies them from `~/.EasyOCR`
+  (downloading with retries if absent) into the git-ignored `docker-models/`,
+  and the Dockerfile COPYs them in — no network during the build. Use this on a
+  flaky connection: a download *inside* `docker build` can't resume, and one
+  dropped connection failed an earlier build.
+- **Git-based host** (Render, Railway, …): the repo has no weights, so
+  `scripts/ensure_ocr_models.py` downloads them during the build, retrying up to
+  6 times (verified: a build with the weights removed downloaded and passed on
+  the first attempt, ~1 minute).
+
+Both end by loading the reader with downloads disabled, so a missing or corrupt
+file fails the build rather than the first request.
 
 Image size: ~764 MB (CPU-only PyTorch, headless OpenCV, models baked in).
 
